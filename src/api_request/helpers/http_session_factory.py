@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager, contextmanager
 
 from httpx2 import AsyncClient, Client
 
-from eve_auth_manager.settings import USER_AGENT
+from api_request.settings import USER_AGENT
 
 
 def config_http_client(user_agent: str = USER_AGENT) -> Client:
