@@ -10,6 +10,8 @@ A cli and api for aquiring, storing, retrieving, and refreshing the Oauth tokens
 
 This project is under a major reorganization, with lots of code being copy pasted in and then refactored.
 
+NOTE: The entire `src/api_request/example` package is purely for reference. It contains non-working code, and it will be deleted as the important ideas are transfered over to the new code base. Ignore it.
+
 ### Goals
 
 Initial project setup and copying over code.
