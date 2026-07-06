@@ -1,6 +1,6 @@
 """Protocols module for API requests."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from types import TracebackType
 from typing import Protocol, Self
 from uuid import UUID
@@ -59,11 +59,11 @@ class CacheProtocol(Protocol):
         ...
 
 
-class ApiRequesterProtocol(Protocol):
+class ApiRequesterProtocol[T: Hashable](Protocol):
     async def process_requests(
         self,
-        requests: dict[UUID, Request],
-    ) -> dict[UUID, Response | FailedResponse]:
+        requests: dict[UUID, Request[T]],
+    ) -> dict[UUID, Response[T] | FailedResponse[T]]:
         """Process a batch of API requests and return their corresponding cached responses."""
         ...
 

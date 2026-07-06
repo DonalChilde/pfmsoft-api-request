@@ -1,9 +1,10 @@
 """Models for API requests."""
 
 import logging
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from pydantic import RootModel
@@ -20,7 +21,7 @@ type PARAMETER = str | int | float
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class Request:
+class Request[T: Hashable]:
     """Represents an API request."""
 
     request_key: UUID
@@ -37,6 +38,8 @@ class Request:
     """The query parameters of the API request."""
     cache_key: UUID | None = None
     """The UUID key for the cached response. If None, the response is not cached."""
+    rate_key: T | None = None
+    """Optional key used by rate-limiter implementations to group requests."""
 
 
 #######################################################################################
@@ -189,27 +192,27 @@ class ResponseMetadata:
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class Response:
+class Response[T: Hashable]:
     """Represents an ESI response."""
 
     metadata: ResponseMetadata
     """The metadata of the response, including status code, headers, etc."""
     text: str
     """The body of the response as a string."""
-    request: Request
+    request: Request[T]
     """The original request that generated this response."""
 
     def to_string(self, indent: int) -> str:
         """Return a string representation of the Response with the specified indentation."""
-        root_model = ResponseRoot(self)
+        root_model = RootModel[Response[Hashable]](cast(Response[Hashable], self))
         json_str = root_model.model_dump_json(indent=indent)
         return json_str
 
     @classmethod
-    def from_string(cls, json_str: str) -> Response:
+    def from_string(cls, json_str: str) -> Response[T]:
         """Parse the Response from a JSON string."""
-        value = ResponseRoot.model_validate_json(json_str).root
-        return value
+        value = RootModel[Response[Hashable]].model_validate_json(json_str).root
+        return cast(Response[T], value)
 
     @property
     def json_loads(self) -> Any:
@@ -222,7 +225,7 @@ class Response:
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class FailedResponse:
+class FailedResponse[T: Hashable]:
     """Represents a failed ESI response, typically due to an error status code."""
 
     metadata: ResponseMetadata | None = None
@@ -230,7 +233,7 @@ class FailedResponse:
     if the request failed before receiving a response."""
     text: str | None = None
     """The body of the response as a string. May be None if the request failed before receiving a response."""
-    request: Request
+    request: Request[T]
     """The original request that generated this failed response."""
     error_messages: list[str] = field(default_factory=list[str])
     """An optional list of error messages describing the failure."""
@@ -296,4 +299,4 @@ class CacheInfo:
 # Root Models
 #######################################################################################
 ResponseMetadataRoot = RootModel[ResponseMetadata]
-ResponseRoot = RootModel[Response]
+ResponseRoot = RootModel[Response[Hashable]]

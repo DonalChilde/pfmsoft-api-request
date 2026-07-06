@@ -18,6 +18,37 @@ Typical usage:
         async with limiter.limit("market/orders"):
                 # perform one rate-limited operation
                 ...
+
+Typed construction with ApiRequester:
+    from uuid import UUID, uuid4
+
+    from api_request.models import Request
+    from api_request.rate_limiter import AiolimiterRateLimiterFactory
+    from api_request.request import ApiRequester
+
+    # Replace with your concrete cache factory.
+    cache_factory = ...
+    rate_limiter_factory = AiolimiterRateLimiterFactory[str](
+        max_rate=100.0,
+        time_period=60.0,
+    )
+
+    requests: dict[UUID, Request[str]] = {
+        uuid4(): Request[str](
+            request_key=uuid4(),
+            url="https://esi.evetech.net/latest/status/",
+            method="GET",
+            rate_key="public-status",
+        )
+    }
+
+
+    async def run() -> None:
+        async with ApiRequester[str](
+            cache_factory=cache_factory,
+            rate_limiter_factory=rate_limiter_factory,
+        ) as requester:
+            await requester.process_requests(requests)
 """
 
 from collections.abc import Hashable
