@@ -2,6 +2,22 @@
 
 This module defines a reusable protocol shape for request gating and provides a
 concrete implementation backed by `aiolimiter.AsyncLimiter`.
+
+Protocol contract:
+        - Each `limit(subject)` call returns an async context manager used to gate one
+            operation.
+        - Implementations may choose how `subject` influences behavior.
+
+Concrete behavior in this module:
+        - `AiolimiterRateLimiter` uses one shared `AsyncLimiter` bucket for all calls.
+        - `subject` is accepted for API compatibility but ignored by the concrete
+            implementation.
+
+Typical usage:
+        limiter = AiolimiterRateLimiterFactory[str](max_rate=100.0, time_period=60.0)()
+        async with limiter.limit("market/orders"):
+                # perform one rate-limited operation
+                ...
 """
 
 from collections.abc import Hashable
@@ -15,16 +31,19 @@ from aiolimiter import AsyncLimiter
 class RateLimiterProtocol[T: Hashable](Protocol):
     """Protocol for a rate limiter that gates async work.
 
-    Implementations may produce one shot limiters for each operation or may produce a
-    shared limiter that gates all operations.
+    Implementations may produce one-shot limiters for each operation or may
+    return a shared limiter context that gates all operations.
+
+    The protocol does not require any grouping strategy. Implementations may
+    ignore `subject`, or they may use it to select or derive limiter behavior.
     """
 
     def limit(self, subject: T) -> AbstractAsyncContextManager[None]:
         """Create an async gate for one operation.
 
-        Depending on the implementation, the subject argument may be used to determine
-        the rate-limiting behavior. For example, a limiter might group requests by
-        endpoint or user.
+        Depending on implementation, `subject` may influence behavior. For
+        example, a limiter might group requests by endpoint family, tenant, or
+        priority class.
 
         Examples:
             async with rate_limiter.limit(subject):
@@ -32,7 +51,8 @@ class RateLimiterProtocol[T: Hashable](Protocol):
                 # gate is acquired.
 
         Args:
-            subject: Domain input that may influence limiter behavior.
+            subject: Domain input that may influence limiter behavior. Prefer a
+                stable, hashable value that represents the grouping intent.
 
         Returns:
             An async context manager that acquires limiter capacity.
@@ -43,11 +63,13 @@ class RateLimiterProtocol[T: Hashable](Protocol):
 class RateLimiterFactoryProtocol[T: Hashable](Protocol):
     """Protocol for callables that build shared rate-limiter instances.
 
-    This protocol is used to create configured rate limiters for use in requesters.
+    This protocol is used to create configured rate limiters for use in
+    requesters. One produced limiter instance is typically reused by one
+    requester/task-group so concurrent work coordinates against shared budget.
     """
 
     def __call__(self) -> RateLimiterProtocol[T]:
-        """Build and return a configured shared rate limiter instance."""
+        """Build and return a configured shared rate-limiter instance."""
         ...
 
 
@@ -56,6 +78,7 @@ class AiolimiterRateLimiter[T: Hashable](RateLimiterProtocol[T]):
     """Shared rate limiter backed by one AsyncLimiter instance.
 
     This implementation enforces a single global bucket for all operations.
+    The provided `subject` value is currently ignored.
 
     """
 
@@ -65,7 +88,8 @@ class AiolimiterRateLimiter[T: Hashable](RateLimiterProtocol[T]):
     def limit(self, subject: T) -> AbstractAsyncContextManager[None]:
         """Return the shared AsyncLimiter as an async context manager.
 
-        NOTE: `subject` is accepted for protocol compatibility. It is currently ignored.
+        NOTE: `subject` is accepted for protocol compatibility and future
+        extensibility. It is currently ignored.
 
         Args:
             subject: Domain input for the gated operation.
@@ -82,18 +106,31 @@ class AiolimiterRateLimiterFactory[T: Hashable](RateLimiterFactoryProtocol[T]):
 
     Use one factory per limiter configuration and one produced limiter per
     requester/task-group that should share budget.
+
+    This factory is designed to be passed into requester constructors that build
+    their shared limiter in `__aenter__`.
     """
 
     max_rate: float
-    """The maximum number of acquisitions allowed within the time period."""
+    """The maximum acquisitions allowed within `time_period`.
+
+    This should be greater than zero.
+    """
     time_period: float = 60.0
-    """The length of the limiting window in seconds."""
+    """The limiting window length in seconds.
+
+    This should be greater than zero.
+    """
 
     def __call__(self) -> AiolimiterRateLimiter[T]:
         """Build a shared rate limiter instance.
 
         Returns:
             A shared rate limiter backed by one configured AsyncLimiter.
+
+        Raises:
+            ValueError: Propagated from `AsyncLimiter` for invalid constructor
+                arguments.
         """
         return AiolimiterRateLimiter(
             limiter=AsyncLimiter(self.max_rate, self.time_period)
