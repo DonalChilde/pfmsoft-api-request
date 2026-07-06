@@ -53,7 +53,7 @@ branch = true
 parallel = true
 
 [tool.ruff.lint]
-select = ["B", "UP", "D", "DOC", "FIX", "I", "F401"]
+select = ["B", "UP", "D", "FIX", "I", "F401"]
 # non-imperative-mood (D401)
 ignore = ["D401", "D101", "D421"]
 # extend-select = ["I"]

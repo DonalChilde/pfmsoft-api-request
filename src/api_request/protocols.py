@@ -1,6 +1,8 @@
 """Protocols module for API requests."""
 
-from typing import Protocol
+from collections.abc import Callable
+from types import TracebackType
+from typing import Protocol, Self
 from uuid import UUID
 
 from api_request.models import (
@@ -13,6 +15,19 @@ from api_request.models import (
 
 
 class CacheProtocol(Protocol):
+    async def __aenter__(self) -> Self:
+        """Enter the asynchronous context manager."""
+        ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Exit the asynchronous context manager."""
+        ...
+
     async def get(self, cache_key: UUID) -> CachedResponse | None:
         """Get a cached response by cache key."""
         ...
@@ -51,3 +66,6 @@ class ApiRequesterProtocol(Protocol):
     ) -> dict[UUID, Response | FailedResponse]:
         """Process a batch of API requests and return their corresponding cached responses."""
         ...
+
+
+CacheFactory = Callable[[], CacheProtocol]

@@ -232,8 +232,8 @@ class FailedResponse:
     """The body of the response as a string. May be None if the request failed before receiving a response."""
     request: Request
     """The original request that generated this failed response."""
-    error_message: str | None = None
-    """An optional error message describing the failure."""
+    error_messages: list[str] = field(default_factory=list[str])
+    """An optional list of error messages describing the failure."""
 
 
 #######################################################################################

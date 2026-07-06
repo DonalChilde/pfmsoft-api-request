@@ -115,6 +115,7 @@ class ExampleClass:
 ```
 
 - Python code should be documented using Google style docstrings.
+- Generated code should come with docstings, even if they are place holders because behavior has not been nailed down.
 - Docstrings should explain the purpose of a function when it is unclear.
 - Docstrings should be kept current after refactors.
 - Type hints should always be used in python code.
