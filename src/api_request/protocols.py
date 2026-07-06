@@ -44,7 +44,7 @@ class CacheProtocol(Protocol):
         ...
 
 
-class ApiRequestProtocol(Protocol):
+class ApiRequesterProtocol(Protocol):
     async def process_requests(
         self,
         requests: dict[UUID, Request],

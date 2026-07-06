@@ -8,10 +8,10 @@ from httpx2 import AsyncClient
 
 from api_request.helpers.http_session_factory import config_async_http_client
 from api_request.models import FailedResponse, Request, Response
-from api_request.protocols import ApiRequestProtocol
+from api_request.protocols import ApiRequesterProtocol
 
 
-class ApiRequest(ApiRequestProtocol):
+class ApiRequester(ApiRequesterProtocol):
     def __init__(self) -> None:
         self._client: AsyncClient | None = None
 
