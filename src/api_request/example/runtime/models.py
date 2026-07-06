@@ -4,9 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from pydantic import RootModel
-from whenever import Instant
-
 from esi_link.cache.models import CacheAction, CachedResponseStatus
 from esi_link.execution.models import HttpResponse
 from esi_link.request.models import RequestGroup
@@ -16,6 +13,8 @@ from esi_link.validation.models import (
     ValidatedRequestAction,
     ValidatedRequestGroupAction,
 )
+from pydantic import RootModel
+from whenever import Instant
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)

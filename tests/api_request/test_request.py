@@ -1,0 +1,313 @@
+"""Tests for request module orchestration behaviors."""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import timedelta
+from types import SimpleNamespace
+from uuid import UUID, uuid4
+
+from whenever import Instant
+
+from api_request.models import CachedResponse, Request
+from api_request.request import (
+    ApiRequester,
+    Source,
+    _CachableRequest,
+    _FailWithResponse,
+    _Response_304_FromStaleCache,
+    _UnprocessedRequest,
+)
+
+
+@dataclass(slots=True)
+class _FakeHttpResponse:
+    status_code: int
+    reason_phrase: str
+    url: str
+    text: str
+    headers: dict[str, str]
+    content: bytes
+    elapsed: timedelta
+
+
+class _FakeAsyncClient:
+    def __init__(self, responses: list[_FakeHttpResponse]):
+        self._responses = responses
+        self._index = 0
+
+    async def request(self, **_: object) -> _FakeHttpResponse:
+        response = self._responses[self._index]
+        self._index += 1
+        return response
+
+
+class _FakeCache:
+    def __init__(self, cached_response: CachedResponse | None = None) -> None:
+        self._cached_response = cached_response
+        self.updated: list[tuple[UUID, CachedResponse]] = []
+
+    async def __aenter__(self) -> _FakeCache:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback,
+    ) -> None:
+        _ = exc_type, exc_value, traceback
+
+    async def get(self, cache_key: UUID) -> CachedResponse | None:
+        _ = cache_key
+        return self._cached_response
+
+    async def set(self, cache_key: UUID, cached_response: CachedResponse) -> None:
+        self._cached_response = cached_response
+        self.updated.append((cache_key, cached_response))
+
+    async def update(self, cache_key: UUID, cached_response: CachedResponse) -> None:
+        self._cached_response = cached_response
+        self.updated.append((cache_key, cached_response))
+
+    async def delete(self, cache_key: UUID) -> None:
+        _ = cache_key
+
+    async def clear(
+        self, only_expired: bool = False, age_limit: int | None = None
+    ) -> None:
+        _ = only_expired, age_limit
+
+    async def flush(self) -> None:
+        return None
+
+    async def cache_info(self):
+        return SimpleNamespace(size=0)
+
+
+class _FakeRateLimiter:
+    @asynccontextmanager
+    async def limit(self, subject: str | None):
+        _ = subject
+        yield
+
+
+def _build_request(*, cache_key: UUID | None = None) -> Request[str]:
+    return Request[str](
+        request_key=uuid4(),
+        url="https://example.invalid/data",
+        method="GET",
+        headers={"Accept": "application/json"},
+        parameters={},
+        cache_key=cache_key,
+        rate_key="test-subject",
+    )
+
+
+def _build_requester(
+    *,
+    responses: list[_FakeHttpResponse],
+    cached_response: CachedResponse | None = None,
+) -> tuple[ApiRequester[str], _FakeCache]:
+    cache = _FakeCache(cached_response=cached_response)
+    requester = ApiRequester[str](
+        cache_factory=lambda: cache,
+        rate_limiter_factory=lambda: _FakeRateLimiter(),
+    )
+    requester._client = _FakeAsyncClient(responses)  # pyright: ignore[reportPrivateUsage]
+    requester._cache = cache  # pyright: ignore[reportPrivateUsage]
+    requester._rate_limit = _FakeRateLimiter()  # pyright: ignore[reportPrivateUsage]
+    return requester, cache
+
+
+def test_http_request_uses_expected_success_statuses_for_304() -> None:
+    """The HTTP helper should allow explicit success overrides for revalidation."""
+
+    async def run() -> None:
+        response_304 = _FakeHttpResponse(
+            status_code=304,
+            reason_phrase="Not Modified",
+            url="https://example.invalid/data",
+            text="",
+            headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+            content=b"",
+            elapsed=timedelta(milliseconds=12),
+        )
+        requester, _ = _build_requester(responses=[response_304])
+
+        result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
+            _UnprocessedRequest(request=_build_request()),
+            allow_pagination=False,
+            expected_success_statuses={304},
+        )
+
+        assert result.metadata.status_code == 304
+        assert result.source == Source.NETWORK
+
+    asyncio.run(run())
+
+
+def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
+    """A stale cache revalidation returning 304 should update metadata and keep body."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        stale_metadata = ApiRequester._http_response_to_metadata(  # pyright: ignore[reportPrivateUsage]
+            _FakeHttpResponse(
+                status_code=200,
+                reason_phrase="OK",
+                url="https://example.invalid/data",
+                text="[1]",
+                headers={
+                    "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                    "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                    "ETag": '"abc"',
+                },
+                content=b"[1]",
+                elapsed=timedelta(milliseconds=10),
+            )
+        )
+        stale_cached = CachedResponse(
+            cache_key=cache_key,
+            response_text="[1]",
+            response_metadata_json=stale_metadata.as_bytes,
+            etag='"abc"',
+            expires_at=Instant.now().timestamp() - 1,
+            timestamped=Instant.now().timestamp_nanos(),
+        )
+
+        response_304 = _FakeHttpResponse(
+            status_code=304,
+            reason_phrase="Not Modified",
+            url="https://example.invalid/data",
+            text="",
+            headers={
+                "Date": "Mon, 06 Jul 2026 18:05:00 GMT",
+                "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                "ETag": '"abc"',
+            },
+            content=b"",
+            elapsed=timedelta(milliseconds=11),
+        )
+
+        requester, cache = _build_requester(
+            responses=[response_304],
+            cached_response=stale_cached,
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            _CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, _Response_304_FromStaleCache)
+        assert result.text == "[1]"
+        assert len(cache.updated) == 1
+        assert cache.updated[0][0] == cache_key
+
+    asyncio.run(run())
+
+
+def test_http_request_uses_fail_with_response_for_404() -> None:
+    """Configured recoverable statuses should map to failure-with-response."""
+
+    async def run() -> None:
+        response_404 = _FakeHttpResponse(
+            status_code=404,
+            reason_phrase="Not Found",
+            url="https://example.invalid/data",
+            text='{"error": "missing"}',
+            headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+            content=b'{"error": "missing"}',
+            elapsed=timedelta(milliseconds=8),
+        )
+        requester, _ = _build_requester(responses=[response_404])
+
+        result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
+            _UnprocessedRequest(request=_build_request()),
+            allow_pagination=False,
+        )
+
+        assert isinstance(result, _FailWithResponse)
+        assert result.metadata.status_code == 404
+
+    asyncio.run(run())
+
+
+def test_unrecoverable_status_helpers_identify_seeded_statuses() -> None:
+    """The explicit status policy helpers should expose unrecoverable seeds."""
+    assert ApiRequester._is_unrecoverable_status(401)  # pyright: ignore[reportPrivateUsage]
+    assert ApiRequester._is_unrecoverable_status(503)  # pyright: ignore[reportPrivateUsage]
+    assert not ApiRequester._is_unrecoverable_status(404)  # pyright: ignore[reportPrivateUsage]
+    assert ApiRequester._is_known_failure_status(404)  # pyright: ignore[reportPrivateUsage]
+    assert ApiRequester._is_known_failure_status(503)  # pyright: ignore[reportPrivateUsage]
+    assert not ApiRequester._is_known_failure_status(201)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_http_request_uses_fail_with_response_for_503() -> None:
+    """Configured unrecoverable statuses should still map to request failure."""
+
+    async def run() -> None:
+        response_503 = _FakeHttpResponse(
+            status_code=503,
+            reason_phrase="Service Unavailable",
+            url="https://example.invalid/data",
+            text='{"error": "busy"}',
+            headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+            content=b'{"error": "busy"}',
+            elapsed=timedelta(milliseconds=8),
+        )
+        requester, _ = _build_requester(responses=[response_503])
+
+        result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
+            _UnprocessedRequest(request=_build_request()),
+            allow_pagination=False,
+        )
+
+        assert isinstance(result, _FailWithResponse)
+        assert result.metadata.status_code == 503
+
+    asyncio.run(run())
+
+
+def test_process_requests_maps_intermediate_results() -> None:
+    """Intermediate response models should map to public response models by key."""
+
+    async def run() -> None:
+        request_key = uuid4()
+        request = _build_request()
+        request_map = {request_key: request}
+
+        requester, _ = _build_requester(responses=[])
+
+        metadata = ApiRequester._http_response_to_metadata(  # pyright: ignore[reportPrivateUsage]
+            _FakeHttpResponse(
+                status_code=200,
+                reason_phrase="OK",
+                url="https://example.invalid/data",
+                text="[1]",
+                headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+                content=b"[1]",
+                elapsed=timedelta(milliseconds=3),
+            )
+        )
+
+        async def fake_dispatch(_: dict[UUID, Request[str]]):
+            return {
+                request_key: _Response_304_FromStaleCache(
+                    request=request,
+                    metadata=metadata,
+                    text="[1]",
+                )
+            }
+
+        requester._dispatch_requests = fake_dispatch  # pyright: ignore[reportPrivateUsage]
+
+        results = await requester.process_requests(request_map)
+        assert request_key in results
+        assert results[request_key].request == request
+
+    asyncio.run(run())

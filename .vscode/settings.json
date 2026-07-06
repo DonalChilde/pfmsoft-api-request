@@ -27,7 +27,7 @@
       88,
       120
     ],
-    "editor.formatOnSave": true,
+    // "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
       "source.organizeImports.ruff": "always"
     },

@@ -3,11 +3,10 @@ import sqlite3
 from typing import Any
 from uuid import UUID
 
-from whenever import Instant
-
 from esi_link.app_data.helpers import transaction
 from esi_link.cache.models import CachedResponse
 from esi_link.execution.models import HttpResponse
+from whenever import Instant
 
 logger = logging.getLogger(__name__)
 

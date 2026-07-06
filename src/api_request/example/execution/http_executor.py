@@ -11,8 +11,6 @@ from typing import cast
 
 import httpx2
 from aiolimiter import AsyncLimiter
-from whenever import Instant
-
 from esi_link.cache.models import (
     CacheAction,
     CachedResponse,
@@ -29,6 +27,7 @@ from esi_link.runtime.models import (
     RuntimeRequestMetrics,
     RuntimeResponse,
 )
+from whenever import Instant
 
 logger = logging.getLogger(__name__)
 

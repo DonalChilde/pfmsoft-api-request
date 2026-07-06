@@ -5,9 +5,6 @@ import logging
 from uuid import UUID
 
 from aiolimiter import AsyncLimiter
-from httpx2 import AsyncClient
-from whenever import Instant
-
 from esi_link.auth.token_manager_sqlite import CharacterTokenManagerSqlite
 from esi_link.cache.sqlite_cache import CacheManagerSqlite
 from esi_link.execution.http_executor import (
@@ -40,6 +37,8 @@ from esi_link.schema.schema_cache_sqlite import SchemaCacheSqlite
 from esi_link.validation.request_validation_factory import (
     validate_requests,
 )
+from httpx2 import AsyncClient
+from whenever import Instant
 
 logger = logging.getLogger(__name__)
 

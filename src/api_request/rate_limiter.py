@@ -69,7 +69,7 @@ class RateLimiterProtocol[T: Hashable](Protocol):
     ignore `subject`, or they may use it to select or derive limiter behavior.
     """
 
-    def limit(self, subject: T) -> AbstractAsyncContextManager[None]:
+    def limit(self, subject: T | None) -> AbstractAsyncContextManager[None]:
         """Create an async gate for one operation.
 
         Depending on implementation, `subject` may influence behavior. For
@@ -116,7 +116,7 @@ class AiolimiterRateLimiter[T: Hashable](RateLimiterProtocol[T]):
     limiter: AsyncLimiter
     """The shared AsyncLimiter used by all gated operations."""
 
-    def limit(self, subject: T) -> AbstractAsyncContextManager[None]:
+    def limit(self, subject: T | None) -> AbstractAsyncContextManager[None]:
         """Return the shared AsyncLimiter as an async context manager.
 
         NOTE: `subject` is accepted for protocol compatibility and future

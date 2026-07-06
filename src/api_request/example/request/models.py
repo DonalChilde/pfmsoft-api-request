@@ -4,11 +4,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import RootModel
-from whenever import Instant
-
 from esi_link.actions.models import Action, GroupAction
 from esi_link.type_defs import Lang
+from pydantic import RootModel
+from whenever import Instant
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)

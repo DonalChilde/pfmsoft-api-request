@@ -1,8 +1,6 @@
 from contextlib import AsyncExitStack
 from types import TracebackType
 
-from httpx2 import AsyncClient, Client
-
 from esi_link.app_data.app_data import AppDataSqlite
 from esi_link.auth.token_tool import TokenTool
 from esi_link.helpers.http_client import config_async_http_client, config_http_client
@@ -14,6 +12,7 @@ from esi_link.request_dispatch_esi_link import (
 )
 from esi_link.response.models import ResponseDebugGroup, ResponseGroup
 from esi_link.settings import EsiLinkSettings
+from httpx2 import AsyncClient, Client
 
 
 class EsiLink:

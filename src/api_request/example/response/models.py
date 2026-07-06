@@ -4,8 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from pydantic import RootModel
-
 from esi_link.execution.models import HttpResponse
 from esi_link.request.models import Request, RequestGroup
 from esi_link.runtime.models import (
@@ -20,6 +18,7 @@ from esi_link.validation.models import (
     ValidatedRequest,
     ValidatedRequestGroupAction,
 )
+from pydantic import RootModel
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)

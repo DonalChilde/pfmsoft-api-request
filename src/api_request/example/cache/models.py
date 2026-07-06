@@ -4,13 +4,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
 
-from whenever import Instant
-
 from esi_link.execution.models import (
     HttpResponse,
     ResponseMetadata,
     ResponseMetadataRoot,
 )
+from whenever import Instant
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)

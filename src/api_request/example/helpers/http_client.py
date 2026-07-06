@@ -4,9 +4,8 @@ Using these helper functions ensures that all requests made to the ESI API inclu
 necessary headers, such as the User-Agent.
 """
 
-from httpx2 import AsyncClient, Client
-
 from esi_link import USER_AGENT
+from httpx2 import AsyncClient, Client
 
 
 def config_http_client(user_agent: str | None = None) -> Client:
