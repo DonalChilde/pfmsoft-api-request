@@ -1,0 +1,48 @@
+[project]
+name = "api-request"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Chad Lowe", email = "pfmsoft.dev@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "httpx2>=2.5.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "typer>=0.26.8",
+    "whenever>=0.10.0",
+]
+# https://packaging.python.org/en/latest/specifications/license-expression/#specification
+license = "MIT"
+# https://packaging.python.org/en/latest/specifications/pyproject-toml/#license-files
+license-files = ["LICENSE"]
+
+
+
+[project.scripts]
+# script entry-points
+# COMMAND_NAME = "PATH.TO.ENTRY.MODULE:ENTRY_FUNCTION"
+
+eve-auth = "api_request.cli.main_typer:app"
+
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.20",
+]
+[project.urls]
+Documentation = "https://github.com/DonalChilde/api-request#readme"
+# Documentation_rtd = "https://esi-link.readthedocs.io"
+Issues = "https://github.com/DonalChilde/api-request/issues"
+Source = "https://github.com/DonalChilde/api-request"
+
+[tool.uv]
+exclude-newer = "1 week"
