@@ -189,24 +189,26 @@ class ResponseMetadata:
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class HttpResponse:
+class Response:
     """Represents an ESI response."""
 
     metadata: ResponseMetadata
     """The metadata of the response, including status code, headers, etc."""
     text: str
     """The body of the response as a string."""
+    request: Request
+    """The original request that generated this response."""
 
     def to_string(self, indent: int) -> str:
-        """Return a string representation of the HttpResponse with the specified indentation."""
-        root_model = HttpResponseRoot(self)
+        """Return a string representation of the Response with the specified indentation."""
+        root_model = ResponseRoot(self)
         json_str = root_model.model_dump_json(indent=indent)
         return json_str
 
     @classmethod
-    def from_string(cls, json_str: str) -> HttpResponse:
-        """Parse the HttpResponse from a JSON string."""
-        value = HttpResponseRoot.model_validate_json(json_str).root
+    def from_string(cls, json_str: str) -> Response:
+        """Parse the Response from a JSON string."""
+        value = ResponseRoot.model_validate_json(json_str).root
         return value
 
     @property
@@ -217,6 +219,21 @@ class HttpResponse:
             The parsed JSON object.
         """
         return from_json(self.text)
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class FailedResponse:
+    """Represents a failed ESI response, typically due to an error status code."""
+
+    metadata: ResponseMetadata | None = None
+    """The metadata of the response, including status code, headers, etc. May be None 
+    if the request failed before receiving a response."""
+    text: str | None = None
+    """The body of the response as a string. May be None if the request failed before receiving a response."""
+    request: Request
+    """The original request that generated this failed response."""
+    error_message: str | None = None
+    """An optional error message describing the failure."""
 
 
 #######################################################################################
@@ -267,8 +284,16 @@ class CacheAction(StrEnum):
     CACHE_304_UPDATE_RESPONSE = "CACHE_304_UPDATE_RESPONSE"
 
 
+@dataclass(slots=True, kw_only=True, frozen=True)
+class CacheInfo:
+    """Represents information about the cache."""
+
+    size: int = -1
+    """The number of entries in the cache."""
+
+
 #######################################################################################
 # Root Models
 #######################################################################################
 ResponseMetadataRoot = RootModel[ResponseMetadata]
-HttpResponseRoot = RootModel[HttpResponse]
+ResponseRoot = RootModel[Response]
