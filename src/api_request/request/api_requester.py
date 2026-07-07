@@ -347,6 +347,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                         metadata=intermediate.metadata,
                         text=intermediate.text,
                         request=intermediate.request,
+                        source=intermediate.source,
                     )
                 case FailWithResponse():
                     responses[request_id] = FailedResponse(

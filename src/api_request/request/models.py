@@ -213,6 +213,8 @@ class Response[T: Hashable]:
     """The body of the response as a string."""
     request: Request[T]
     """The original request that generated this response."""
+    source: Source
+    """The source of the response, for example cache or network."""
 
     def to_string(self, indent: int) -> str:
         """Return a string representation of the Response with the specified indentation."""
