@@ -5,7 +5,10 @@ import time
 
 from aiolimiter import AsyncLimiter
 
-from api_request.rate_limiter import AiolimiterRateLimiter, AiolimiterRateLimiterFactory
+from api_request.rate_limit.aio_limiter import (
+    AiolimiterRateLimiter,
+    AiolimiterRateLimiterFactory,
+)
 
 
 def test_limit_returns_same_limiter_for_different_subjects() -> None:

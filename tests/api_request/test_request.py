@@ -11,17 +11,18 @@ from uuid import UUID, uuid4
 
 from whenever import Instant
 
-from api_request.models import CachedResponse, Request
-from api_request.request import (
-    ApiRequester,
-    Source,
-    _CachableRequest,
-    _FailWithResponse,
-    _Response_200_FromStaleCache,
-    _Response_304_FromStaleCache,
-    _SuccessfulResponse,
-    _UnprocessedRequest,
+from api_request.cache.models import CachedResponse
+from api_request.request.api_requester import ApiRequester
+from api_request.request.intermediate_models import (
+    CachableRequest,
+    FailNoResponse,
+    FailWithResponse,
+    Response200FromStaleCache,
+    Response304FromStaleCache,
+    SuccessfulResponse,
+    UnprocessedRequest,
 )
+from api_request.request.models import Request, Source
 
 
 @dataclass(slots=True)
@@ -167,7 +168,7 @@ def test_http_request_uses_expected_success_statuses_for_304() -> None:
         requester, _ = _build_requester(responses=[response_304])
 
         result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
-            _UnprocessedRequest(request=_build_request()),
+            UnprocessedRequest(request=_build_request()),
             allow_pagination=False,
             expected_success_statuses={304},
         )
@@ -227,12 +228,12 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
         )
 
         result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
-            _CachableRequest(
+            CachableRequest(
                 request=_build_request(cache_key=cache_key), cache_key=cache_key
             )
         )
 
-        assert isinstance(result, _Response_304_FromStaleCache)
+        assert isinstance(result, Response304FromStaleCache)
         assert result.text == "[1]"
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
@@ -289,10 +290,10 @@ def test_cacheable_request_applies_stale_headers_without_mutating_request() -> N
         )
 
         result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
-            _CachableRequest(request=original_request, cache_key=cache_key)
+            CachableRequest(request=original_request, cache_key=cache_key)
         )
 
-        assert isinstance(result, _Response_304_FromStaleCache)
+        assert isinstance(result, Response304FromStaleCache)
         assert original_request.headers == {"Accept": "application/json"}
         assert len(requester._client.calls) == 1  # pyright: ignore[reportPrivateUsage]
         assert requester._client.calls[0]["headers"] == {  # pyright: ignore[reportPrivateUsage]
@@ -329,12 +330,12 @@ def test_cacheable_request_returns_fresh_cache_hit() -> None:
         )
 
         result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
-            _CachableRequest(
+            CachableRequest(
                 request=_build_request(cache_key=cache_key), cache_key=cache_key
             )
         )
 
-        assert isinstance(result, _SuccessfulResponse)
+        assert isinstance(result, SuccessfulResponse)
         assert result.source == Source.CACHE
         assert result.text == "[1]"
         assert len(cache.updated) == 0
@@ -388,12 +389,12 @@ def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
         )
 
         result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
-            _CachableRequest(
+            CachableRequest(
                 request=_build_request(cache_key=cache_key), cache_key=cache_key
             )
         )
 
-        assert isinstance(result, _Response_200_FromStaleCache)
+        assert isinstance(result, Response200FromStaleCache)
         assert result.text == "[2]"
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
@@ -454,16 +455,16 @@ def test_cacheable_request_refreshes_stale_paged_entry_on_200() -> None:
         )
 
         result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
-            _CachableRequest(
+            CachableRequest(
                 request=_build_request(cache_key=cache_key), cache_key=cache_key
             )
         )
 
-        assert isinstance(result, _Response_200_FromStaleCache)
-        assert result.text == "[2, 3]"
+        assert isinstance(result, Response200FromStaleCache)
+        assert result.text == "[2,3]"
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
-        assert cache.updated[0][1].response_text == "[2, 3]"
+        assert cache.updated[0][1].response_text == "[2,3]"
 
     asyncio.run(run())
 
@@ -484,11 +485,11 @@ def test_http_request_uses_fail_with_response_for_404() -> None:
         requester, _ = _build_requester(responses=[response_404])
 
         result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
-            _UnprocessedRequest(request=_build_request()),
+            UnprocessedRequest(request=_build_request()),
             allow_pagination=False,
         )
 
-        assert isinstance(result, _FailWithResponse)
+        assert isinstance(result, FailWithResponse)
         assert result.metadata.status_code == 404
 
     asyncio.run(run())
@@ -520,11 +521,11 @@ def test_http_request_uses_fail_with_response_for_503() -> None:
         requester, _ = _build_requester(responses=[response_503])
 
         result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
-            _UnprocessedRequest(request=_build_request()),
+            UnprocessedRequest(request=_build_request()),
             allow_pagination=False,
         )
 
-        assert isinstance(result, _FailWithResponse)
+        assert isinstance(result, FailWithResponse)
         assert result.metadata.status_code == 503
 
     asyncio.run(run())
@@ -564,7 +565,7 @@ def test_handle_paged_response_merges_json_lists() -> None:
             ]
         )
         request = _build_request()
-        paged = _SuccessfulResponse(
+        paged = SuccessfulResponse(
             request=request,
             metadata=first_metadata,
             text=first_text,
@@ -573,8 +574,8 @@ def test_handle_paged_response_merges_json_lists() -> None:
 
         result = await requester._handle_paged_response(paged)  # pyright: ignore[reportPrivateUsage]
 
-        assert isinstance(result, _SuccessfulResponse)
-        assert result.text == "[1, 2]"
+        assert isinstance(result, SuccessfulResponse)
+        assert result.text == "[1,2]"
 
     asyncio.run(run())
 
@@ -607,7 +608,7 @@ def test_handle_paged_response_fails_on_source_drift() -> None:
             ]
         )
         request = _build_request()
-        paged = _SuccessfulResponse(
+        paged = SuccessfulResponse(
             request=request,
             metadata=first_metadata,
             text=first_text,
@@ -616,7 +617,7 @@ def test_handle_paged_response_fails_on_source_drift() -> None:
 
         result = await requester._handle_paged_response(paged)  # pyright: ignore[reportPrivateUsage]
 
-        assert result.__class__.__name__ == "_FailNoResponse"
+        assert isinstance(result, FailNoResponse)
 
     asyncio.run(run())
 
@@ -645,7 +646,7 @@ def test_process_requests_maps_intermediate_results() -> None:
 
         async def fake_dispatch(_: dict[UUID, Request[str]]):
             return {
-                request_key: _Response_304_FromStaleCache(
+                request_key: Response304FromStaleCache(
                     request=request,
                     metadata=metadata,
                     text="[1]",

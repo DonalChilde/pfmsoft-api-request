@@ -15,3 +15,7 @@ __release__ = __version__
 #######################################################################################=
 __url__ = "https://github.com/DonalChilde/api-request"
 __license__ = "MIT"
+
+from .request.api_requester import ApiRequester
+
+__all__ = ["ApiRequester"]

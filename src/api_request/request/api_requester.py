@@ -66,10 +66,9 @@ Operational contracts:
 """
 
 import asyncio
-import json
+import logging
 from collections.abc import Hashable
-from dataclasses import dataclass, replace
-from enum import StrEnum
+from dataclasses import replace
 from types import TracebackType
 from typing import Any, Self, cast
 from uuid import UUID
@@ -78,185 +77,41 @@ from httpx2 import AsyncClient
 from httpx2 import Response as HttpResponse
 from whenever import Instant
 
+from api_request.cache.models import CachedResponse
+from api_request.cache.protocols import CacheFactory, CacheProtocol
 from api_request.helpers import json_io
 from api_request.helpers.http_session_factory import config_async_http_client
-from api_request.models import (
-    CachedResponse,
+from api_request.rate_limit.protocols import (
+    RateLimiterFactoryProtocol,
+    RateLimiterProtocol,
+)
+from api_request.request.intermediate_models import (
+    CachableRequest,
+    FailedRequestBase,
+    FailNoResponse,
+    FailWithResponse,
+    IntermediateResponseBase,
+    RequestFromStaleCache,
+    Response200FromStaleCache,
+    Response304FromStaleCache,
+    SuccessfulResponse,
+    SuccessfulResponseBase,
+    UnprocessedRequest,
+)
+from api_request.request.models import (
     FailedResponse,
     Request,
     Response,
     ResponseMetadata,
     ResponseMetadataRoot,
+    Source,
 )
-from api_request.protocols import (
+from api_request.request.protocols import (
     ApiRequesterProtocol,
-    CacheFactory,
-    CacheProtocol,
 )
-from api_request.rate_limiter import RateLimiterFactoryProtocol, RateLimiterProtocol
 
-
-class Source(StrEnum):
-    """Enumeration of possible sources for a response."""
-
-    CACHE = "cache"
-    """The response was retrieved from the cache."""
-    CACHE_304 = "cache-304"
-    """The response was retrieved from the cache and indicates that the cached response 
-    was still valid (HTTP 304 Not Modified)."""
-    CACHE_200 = "cache-200"
-    """The response was retrieved from the cache and indicates that the cached response 
-    was stale and has been refreshed (HTTP 200 OK)."""
-    NETWORK = "network"
-    """The response was retrieved from the network."""
-
-
-@dataclass(slots=True, kw_only=True)
-class _IntermediateRequestBase[T: Hashable]:
-    """An intermediate request used during request processing.
-
-    Used a base class for various intermediate request and response types during the
-    processing of API requests. Not directly instantiated, but serves as a common
-    interface for the different stages of request handling.
-    """
-
-    request: Request[T]
-    """The original request that generated this intermediate response."""
-
-
-@dataclass(slots=True, kw_only=True)
-class _IntermediateResponseBase[T: Hashable](_IntermediateRequestBase[T]):
-    """An intermediate response used during request processing.
-
-    Used as a base class for various intermediate request and response types during the
-    processing of API requests. Not directly instantiated, but serves as a common
-    interface for the different stages of request handling.
-    """
-
-    pass
-
-
-@dataclass(slots=True, kw_only=True)
-class _FailedRequestBase[T: Hashable](_IntermediateResponseBase[T]):
-    """A failed request used during request processing.
-
-    Used as a base class for various intermediate request and response types that
-    represent failed requests during the processing of API requests. Not directly
-    instantiated, but serves as a common interface for the different stages of request
-    handling.
-    """
-
-    pass
-
-
-@dataclass(slots=True, kw_only=True)
-class _FailNoResponse[T: Hashable](_FailedRequestBase[T]):
-    """An intermediate response used during request processing.
-
-    Used when no response was received.
-    """
-
-    error_message: str
-    """An error message describing the failure."""
-
-
-@dataclass(slots=True, kw_only=True)
-class _FailWithResponse[T: Hashable](_FailedRequestBase[T]):
-    """An intermediate response used during request processing.
-
-    Used when a response was received but indicates failure.
-    """
-
-    metadata: ResponseMetadata
-    """The metadata of the response, including status code, headers, etc."""
-    text: str
-    """The body of the response as a string."""
-
-
-@dataclass(slots=True, kw_only=True)
-class _UnprocessedRequest[T: Hashable](_IntermediateRequestBase[T]):
-    """An unprocessed response used during request processing."""
-
-    pass
-
-
-@dataclass(slots=True, kw_only=True)
-class _SuccessfulResponseBase[T: Hashable](_IntermediateResponseBase[T]):
-    """A successful response used during request processing.
-
-    Used when a response was received and indicates success.
-    """
-
-    metadata: ResponseMetadata
-    """The metadata of the response, including status code, headers, etc."""
-    text: str
-    """The body of the response as a string."""
-    source: Source
-    """The source of the response, e.g., 'cache' or 'network'."""
-
-
-@dataclass(slots=True, kw_only=True)
-class _SuccessfulResponse[T: Hashable](_SuccessfulResponseBase[T]):
-    """A successful response used during request processing.
-
-    Used when a response was received and indicates success.
-    """
-
-
-@dataclass(slots=True, kw_only=True)
-class _CachableRequest[T: Hashable](_UnprocessedRequest[T]):
-    """A cachable request used during request processing."""
-
-    cache_key: UUID
-    """The cache key associated with this request, used for caching responses."""
-
-
-@dataclass(slots=True, kw_only=True)
-class _RequestFromStaleCache[T: Hashable](_CachableRequest[T]):
-    """A request from the cache that is stale and needs to be refreshed."""
-
-    etag: str | None
-    """The ETag of the cached response."""
-    last_modified: str | None = None
-    """The Last-Modified header of the cached response, if available."""
-
-    @property
-    def conditional_headers(self) -> dict[str, str]:
-        """Return the conditional headers for the request based on ETag and Last-Modified."""
-        headers: dict[str, str] = {}
-        if not self.etag and not self.last_modified:
-            raise ValueError(
-                "At least one of ETag or Last-Modified must be provided for a stale cache request."
-            )
-        if self.etag:
-            headers["If-None-Match"] = self.etag
-        if self.last_modified:
-            headers["If-Modified-Since"] = self.last_modified
-        return headers
-
-
-@dataclass(slots=True, kw_only=True)
-class _Response_304_FromStaleCache[T: Hashable](_SuccessfulResponseBase[T]):
-    """A response indicating that the cached response is still valid (HTTP 304 Not Modified).
-
-    This should come from the response to `_RequestFromStaleCache` and indicates that
-    the cached response is still valid, but the metadata may have been updated (e.g.,
-    headers like Cache-Control, Expires, etc.).
-    """
-
-    source: Source = Source.CACHE_304
-
-
-@dataclass(slots=True, kw_only=True)
-class _Response_200_FromStaleCache[T: Hashable](_SuccessfulResponseBase[T]):
-    """A response indicating that the cached response is stale and has been refreshed (HTTP 200 OK).
-
-    This should come from the response to `_RequestFromStaleCache` and indicates that
-    the cached response needs to be updated with the new response data. The metadata
-    and text of the new response are included.
-    """
-
-    source: Source = Source.CACHE_200
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
@@ -357,12 +212,17 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
     @staticmethod
     def _http_response_to_metadata(response: HttpResponse) -> ResponseMetadata:
         """Convert an HTTP client response to package response metadata."""
+        bytes_downloaded = getattr(
+            response,
+            "num_bytes_downloaded",
+            len(getattr(response, "content", b"")),
+        )
         return ResponseMetadata(
             status_code=response.status_code,
             reason_phrase=response.reason_phrase,
             url=str(response.url),
             elapsed=int(response.elapsed.total_seconds() * 1_000_000),
-            bytes_downloaded=response.num_bytes_downloaded,
+            bytes_downloaded=bytes_downloaded,
             headers=tuple(response.headers.items()),
             received_timestamp=Instant.now().timestamp_nanos(),
         )
@@ -405,11 +265,11 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         merged: list[object] = []
         all_texts = [first_text, *other_texts]
         for text in all_texts:
-            payload: Any = json.loads(text)
+            payload: Any = json_io.json_loads(text)
             if not isinstance(payload, list):
                 raise ValueError("Paged response body is not a JSON list")
             merged.extend(cast(list[object], payload))
-        return json.dumps(merged)
+        return json_io.json_dumps(merged)
 
     async def __aenter__(self) -> Self:
         """Enter the asynchronous context manager."""
@@ -482,13 +342,13 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         responses: dict[UUID, Response[T] | FailedResponse[T]] = {}
         for request_id, intermediate in intermediate_responses.items():
             match intermediate:
-                case _SuccessfulResponseBase():
+                case SuccessfulResponseBase():
                     responses[request_id] = Response(
                         metadata=intermediate.metadata,
                         text=intermediate.text,
                         request=intermediate.request,
                     )
-                case _FailWithResponse():
+                case FailWithResponse():
                     responses[request_id] = FailedResponse(
                         metadata=intermediate.metadata,
                         text=intermediate.text,
@@ -497,7 +357,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                             f"HTTP {intermediate.metadata.status_code} {intermediate.metadata.reason_phrase}"
                         ],
                     )
-                case _FailNoResponse():
+                case FailNoResponse():
                     responses[request_id] = FailedResponse(
                         request=intermediate.request,
                         error_messages=[intermediate.error_message],
@@ -512,22 +372,20 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
     async def _dispatch_requests(
         self,
         requests: dict[UUID, Request[T]],
-    ) -> dict[UUID, _IntermediateResponseBase[T]]:
+    ) -> dict[UUID, IntermediateResponseBase[T]]:
         """Dispatch a batch of API requests and return their corresponding intermediate responses."""
 
-        async def execute(request: Request[T]) -> _IntermediateResponseBase[T]:
+        async def execute(request: Request[T]) -> IntermediateResponseBase[T]:
             try:
                 if request.cache_key is None:
-                    return await self._http_request(
-                        _UnprocessedRequest(request=request)
-                    )
+                    return await self._http_request(UnprocessedRequest(request=request))
                 return await self._cacheable_request(
-                    _CachableRequest(request=request, cache_key=request.cache_key)
+                    CachableRequest(request=request, cache_key=request.cache_key)
                 )
             except Exception as exc:  # noqa: BLE001
                 if self._is_fatal_exception(exc):
                     raise
-                return _FailNoResponse(request=request, error_message=str(exc))
+                return FailNoResponse(request=request, error_message=str(exc))
 
         task_keys = list(requests.keys())
         task_values = [asyncio.create_task(execute(requests[k])) for k in task_keys]
@@ -536,16 +394,16 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     async def _http_request(
         self,
-        request: _UnprocessedRequest[T],
+        request: UnprocessedRequest[T],
         *,
         allow_pagination: bool = True,
         expected_success_statuses: set[int] | None = None,
-    ) -> _SuccessfulResponseBase[T] | _FailedRequestBase[T]:
+    ) -> SuccessfulResponseBase[T] | FailedRequestBase[T]:
         """Perform an HTTP request and return the corresponding intermediate response."""
         session = await self.session
         rate_limiter = await self.rate_limiter
         outgoing_headers = request.request.headers
-        if isinstance(request, _RequestFromStaleCache):
+        if isinstance(request, RequestFromStaleCache):
             outgoing_headers = {
                 **request.request.headers,
                 **request.conditional_headers,
@@ -562,7 +420,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         except Exception as exc:  # noqa: BLE001
             if self._is_fatal_exception(exc):
                 raise
-            return _FailNoResponse(request=request.request, error_message=str(exc))
+            return FailNoResponse(request=request.request, error_message=str(exc))
 
         metadata = self._http_response_to_metadata(http_response)
         text = http_response.text
@@ -573,7 +431,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             and status_code in expected_success_statuses
         )
         if is_explicit_success or self._is_success_status(status_code):
-            success = _SuccessfulResponse(
+            success = SuccessfulResponse(
                 request=request.request,
                 metadata=metadata,
                 text=text,
@@ -588,24 +446,24 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             return success
 
         if self._is_known_failure_status(status_code):
-            return _FailWithResponse(
+            return FailWithResponse(
                 request=request.request, metadata=metadata, text=text
             )
 
-        return _FailWithResponse(request=request.request, metadata=metadata, text=text)
+        return FailWithResponse(request=request.request, metadata=metadata, text=text)
 
     async def _cacheable_request(
-        self, request: _CachableRequest[T]
-    ) -> _SuccessfulResponseBase[T] | _FailedRequestBase[T]:
+        self, request: CachableRequest[T]
+    ) -> SuccessfulResponseBase[T] | FailedRequestBase[T]:
         """Perform a cacheable HTTP request and return the corresponding intermediate response."""
         cache = await self.cache
         cached_response = await cache.get(request.cache_key)
 
         if cached_response is None:
             response = await self._http_request(
-                _UnprocessedRequest(request=request.request),
+                UnprocessedRequest(request=request.request),
             )
-            if isinstance(response, _SuccessfulResponseBase):
+            if isinstance(response, SuccessfulResponseBase):
                 await cache.set(
                     request.cache_key,
                     self._as_cached_response(
@@ -618,14 +476,14 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
         cached_metadata = self._cached_metadata(cached_response)
         if not cached_response.is_expired:
-            return _SuccessfulResponse(
+            return SuccessfulResponse(
                 request=request.request,
                 metadata=cached_metadata,
                 text=cached_response.response_text,
                 source=Source.CACHE,
             )
 
-        stale_request = _RequestFromStaleCache(
+        stale_request = RequestFromStaleCache(
             request=request.request,
             cache_key=request.cache_key,
             etag=cached_response.etag,
@@ -636,7 +494,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             allow_pagination=True,
             expected_success_statuses={200, 304},
         )
-        if isinstance(refreshed, _FailedRequestBase):
+        if isinstance(refreshed, FailedRequestBase):
             return refreshed
 
         match refreshed.metadata.status_code:
@@ -648,7 +506,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                     etag=cached_response.etag,
                 )
                 await cache.update(request.cache_key, metadata_refresh)
-                return _Response_304_FromStaleCache(
+                return Response304FromStaleCache(
                     request=request.request,
                     metadata=refreshed.metadata,
                     text=cached_response.response_text,
@@ -660,39 +518,39 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                     metadata=refreshed.metadata,
                 )
                 await cache.update(request.cache_key, replacement)
-                return _Response_200_FromStaleCache(
+                return Response200FromStaleCache(
                     request=request.request,
                     metadata=refreshed.metadata,
                     text=refreshed.text,
                 )
             case _:
-                return _FailWithResponse(
+                return FailWithResponse(
                     request=request.request,
                     metadata=refreshed.metadata,
                     text=refreshed.text,
                 )
 
-    def _is_paged_response(self, response: _SuccessfulResponse[T]) -> bool:
+    def _is_paged_response(self, response: SuccessfulResponse[T]) -> bool:
         """Determine if the response is a paged response."""
         return response.metadata.status_code == 200 and response.metadata.pages > 1
 
     async def _handle_paged_response(
-        self, response: _SuccessfulResponse[T]
-    ) -> _SuccessfulResponseBase[T] | _FailedRequestBase[T]:
+        self, response: SuccessfulResponse[T]
+    ) -> SuccessfulResponseBase[T] | FailedRequestBase[T]:
         """Handle a paged response and return consolidated response."""
         total_pages = response.metadata.pages
         if total_pages <= 1:
             return response
 
-        paged_responses: list[_SuccessfulResponseBase[T]] = []
+        paged_responses: list[SuccessfulResponseBase[T]] = []
         page_responses = await self._gather_paged_responses(response)
         for page_response in page_responses:
-            if isinstance(page_response, _FailedRequestBase):
+            if isinstance(page_response, FailedRequestBase):
                 return page_response
             paged_responses.append(page_response)
 
         if self._has_source_changed(response, paged_responses):
-            return _FailNoResponse(
+            return FailNoResponse(
                 request=response.request,
                 error_message=(
                     "Detected source data change while collecting paged response; "
@@ -706,9 +564,9 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                 [item.text for item in paged_responses],
             )
         except Exception as exc:  # noqa: BLE001
-            return _FailNoResponse(request=response.request, error_message=str(exc))
+            return FailNoResponse(request=response.request, error_message=str(exc))
 
-        return _SuccessfulResponse(
+        return SuccessfulResponse(
             request=response.request,
             metadata=response.metadata,
             text=merged_text,
@@ -716,8 +574,8 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         )
 
     async def _gather_paged_responses(
-        self, response: _SuccessfulResponse[T]
-    ) -> list[_SuccessfulResponseBase[T] | _FailedRequestBase[T]]:
+        self, response: SuccessfulResponse[T]
+    ) -> list[SuccessfulResponseBase[T] | FailedRequestBase[T]]:
         """Fetch all additional pages for a paged response concurrently."""
         return await asyncio.gather(
             *(
@@ -731,11 +589,11 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     @staticmethod
     def _build_paged_request(
-        response: _SuccessfulResponse[T],
+        response: SuccessfulResponse[T],
         page_number: int,
-    ) -> _UnprocessedRequest[T]:
+    ) -> UnprocessedRequest[T]:
         """Build a request for one additional paged response."""
-        return _UnprocessedRequest(
+        return UnprocessedRequest(
             request=replace(
                 response.request,
                 parameters={
@@ -747,8 +605,8 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     def _has_source_changed(
         self,
-        first_response: _SuccessfulResponseBase[T],
-        paged_responses: list[_SuccessfulResponseBase[T]],
+        first_response: SuccessfulResponseBase[T],
+        paged_responses: list[SuccessfulResponseBase[T]],
     ) -> bool:
         """Check if the data on the server has changed between the first and subsequent paged responses."""
         # If the last-modified header for the first response does not match the last-modified header
