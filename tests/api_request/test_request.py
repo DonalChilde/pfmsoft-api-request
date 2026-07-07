@@ -39,8 +39,10 @@ class _FakeAsyncClient:
     def __init__(self, responses: list[_FakeHttpResponse]):
         self._responses = responses
         self._index = 0
+        self.calls: list[dict[str, object]] = []
 
     async def request(self, **_: object) -> _FakeHttpResponse:
+        self.calls.append(dict(_))
         response = self._responses[self._index]
         self._index += 1
         return response
@@ -238,6 +240,70 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
     asyncio.run(run())
 
 
+def test_cacheable_request_applies_stale_headers_without_mutating_request() -> None:
+    """Stale-cache conditional headers should be injected at send time only."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        original_request = _build_request(cache_key=cache_key)
+        stale_metadata = ApiRequester._http_response_to_metadata(  # pyright: ignore[reportPrivateUsage]
+            _FakeHttpResponse(
+                status_code=200,
+                reason_phrase="OK",
+                url="https://example.invalid/data",
+                text="[1]",
+                headers={
+                    "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                    "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                    "ETag": '"abc"',
+                },
+                content=b"[1]",
+                elapsed=timedelta(milliseconds=10),
+            )
+        )
+        stale_cached = CachedResponse(
+            cache_key=cache_key,
+            response_text="[1]",
+            response_metadata_json=stale_metadata.as_bytes,
+            etag='"abc"',
+            expires_at=Instant.now().timestamp() - 1,
+            timestamped=Instant.now().timestamp_nanos(),
+        )
+        response_304 = _FakeHttpResponse(
+            status_code=304,
+            reason_phrase="Not Modified",
+            url="https://example.invalid/data",
+            text="",
+            headers={
+                "Date": "Mon, 06 Jul 2026 18:05:00 GMT",
+                "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                "ETag": '"abc"',
+            },
+            content=b"",
+            elapsed=timedelta(milliseconds=11),
+        )
+
+        requester, _ = _build_requester(
+            responses=[response_304],
+            cached_response=stale_cached,
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            _CachableRequest(request=original_request, cache_key=cache_key)
+        )
+
+        assert isinstance(result, _Response_304_FromStaleCache)
+        assert original_request.headers == {"Accept": "application/json"}
+        assert len(requester._client.calls) == 1  # pyright: ignore[reportPrivateUsage]
+        assert requester._client.calls[0]["headers"] == {  # pyright: ignore[reportPrivateUsage]
+            "Accept": "application/json",
+            "If-None-Match": '"abc"',
+            "If-Modified-Since": "Mon, 06 Jul 2026 17:00:00 GMT",
+        }
+
+    asyncio.run(run())
+
+
 def test_cacheable_request_returns_fresh_cache_hit() -> None:
     """An unexpired cached response should return directly without network refresh."""
 
@@ -331,6 +397,73 @@ def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
         assert result.text == "[2]"
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
+
+    asyncio.run(run())
+
+
+def test_cacheable_request_refreshes_stale_paged_entry_on_200() -> None:
+    """A stale paged cache revalidation returning 200 should cache the merged body."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        stale_text, stale_metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=2,
+        )
+        stale_cached = CachedResponse(
+            cache_key=cache_key,
+            response_text=stale_text,
+            response_metadata_json=stale_metadata.as_bytes,  # pyright: ignore[reportUnknownMemberType]
+            etag='"abc"',
+            expires_at=Instant.now().timestamp() - 1,
+            timestamped=Instant.now().timestamp_nanos(),
+        )
+
+        first_page_response = _FakeHttpResponse(
+            status_code=200,
+            reason_phrase="OK",
+            url="https://example.invalid/data",
+            text="[2]",
+            headers={
+                "Date": "Mon, 06 Jul 2026 18:05:00 GMT",
+                "Last-Modified": "Mon, 06 Jul 2026 17:30:00 GMT",
+                "X-Pages": "2",
+            },
+            content=b"[2]",
+            elapsed=timedelta(milliseconds=11),
+        )
+        second_page_response = _FakeHttpResponse(
+            status_code=200,
+            reason_phrase="OK",
+            url="https://example.invalid/data",
+            text="[3]",
+            headers={
+                "Date": "Mon, 06 Jul 2026 18:05:00 GMT",
+                "Last-Modified": "Mon, 06 Jul 2026 17:30:00 GMT",
+                "X-Pages": "1",
+            },
+            content=b"[3]",
+            elapsed=timedelta(milliseconds=11),
+        )
+
+        requester, cache = _build_requester(
+            responses=[first_page_response, second_page_response],
+            cached_response=stale_cached,
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            _CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, _Response_200_FromStaleCache)
+        assert result.text == "[2, 3]"
+        assert len(cache.updated) == 1
+        assert cache.updated[0][0] == cache_key
+        assert cache.updated[0][1].response_text == "[2, 3]"
 
     asyncio.run(run())
 

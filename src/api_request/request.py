@@ -78,6 +78,7 @@ from httpx2 import AsyncClient
 from httpx2 import Response as HttpResponse
 from whenever import Instant
 
+from api_request.helpers import json_io
 from api_request.helpers.http_session_factory import config_async_http_client
 from api_request.models import (
     CachedResponse,
@@ -361,7 +362,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             reason_phrase=response.reason_phrase,
             url=str(response.url),
             elapsed=int(response.elapsed.total_seconds() * 1_000_000),
-            bytes_downloaded=len(response.content),
+            bytes_downloaded=response.num_bytes_downloaded,
             headers=tuple(response.headers.items()),
             received_timestamp=Instant.now().timestamp_nanos(),
         )
@@ -543,12 +544,18 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         """Perform an HTTP request and return the corresponding intermediate response."""
         session = await self.session
         rate_limiter = await self.rate_limiter
+        outgoing_headers = request.request.headers
+        if isinstance(request, _RequestFromStaleCache):
+            outgoing_headers = {
+                **request.request.headers,
+                **request.conditional_headers,
+            }
         try:
             async with rate_limiter.limit(request.request.rate_key):
                 http_response = await session.request(
                     method=request.request.method,
                     url=request.request.url,
-                    headers=request.request.headers,
+                    headers=outgoing_headers,
                     params=request.request.parameters,
                     json=request.request.body,
                 )
@@ -618,24 +625,15 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                 source=Source.CACHE,
             )
 
-        conditional_headers: dict[str, str] = {}
-        if cached_response.etag:
-            conditional_headers["If-None-Match"] = cached_response.etag
-        if cached_metadata.last_modified:
-            conditional_headers["If-Modified-Since"] = cached_metadata.last_modified
-
         stale_request = _RequestFromStaleCache(
-            request=replace(
-                request.request,
-                headers={**request.request.headers, **conditional_headers},
-            ),
+            request=request.request,
             cache_key=request.cache_key,
             etag=cached_response.etag,
             last_modified=cached_metadata.last_modified,
         )
         refreshed = await self._http_request(
             stale_request,
-            allow_pagination=False,
+            allow_pagination=True,
             expected_success_statuses={200, 304},
         )
         if isinstance(refreshed, _FailedRequestBase):
@@ -687,14 +685,8 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             return response
 
         paged_responses: list[_SuccessfulResponseBase[T]] = []
-        for page_number in range(2, total_pages + 1):
-            page_parameters = dict(response.request.parameters)
-            page_parameters["page"] = page_number
-            page_request = replace(response.request, parameters=page_parameters)
-            page_response = await self._http_request(
-                _UnprocessedRequest(request=page_request),
-                allow_pagination=False,
-            )
+        page_responses = await self._gather_paged_responses(response)
+        for page_response in page_responses:
             if isinstance(page_response, _FailedRequestBase):
                 return page_response
             paged_responses.append(page_response)
@@ -721,6 +713,36 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             metadata=response.metadata,
             text=merged_text,
             source=response.source,
+        )
+
+    async def _gather_paged_responses(
+        self, response: _SuccessfulResponse[T]
+    ) -> list[_SuccessfulResponseBase[T] | _FailedRequestBase[T]]:
+        """Fetch all additional pages for a paged response concurrently."""
+        return await asyncio.gather(
+            *(
+                self._http_request(
+                    self._build_paged_request(response, page_number),
+                    allow_pagination=False,
+                )
+                for page_number in range(2, response.metadata.pages + 1)
+            )
+        )
+
+    @staticmethod
+    def _build_paged_request(
+        response: _SuccessfulResponse[T],
+        page_number: int,
+    ) -> _UnprocessedRequest[T]:
+        """Build a request for one additional paged response."""
+        return _UnprocessedRequest(
+            request=replace(
+                response.request,
+                parameters={
+                    **response.request.parameters,
+                    "page": page_number,
+                },
+            )
         )
 
     def _has_source_changed(
