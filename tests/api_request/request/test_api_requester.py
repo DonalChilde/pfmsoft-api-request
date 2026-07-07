@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from whenever import Instant
 
+from api_request.cache.metadata_helpers import merge_cached_revalidation_metadata
 from api_request.cache.models import CachedResponse
 from api_request.request.api_requester import ApiRequester
 from api_request.request.intermediate_models import (
@@ -22,7 +23,12 @@ from api_request.request.intermediate_models import (
     SuccessfulResponse,
     UnprocessedRequest,
 )
-from api_request.request.models import Request, Source
+from api_request.request.models import (
+    Request,
+    ResponseMetadata,
+    ResponseMetadataRoot,
+    Source,
+)
 
 
 @dataclass(slots=True)
@@ -69,13 +75,48 @@ class _FakeCache:
         _ = cache_key
         return self._cached_response
 
-    async def set(self, cache_key: UUID, cached_response: CachedResponse) -> None:
+    async def set(
+        self, cache_key: UUID, text: str, metadata: ResponseMetadata
+    ) -> CachedResponse:
+        cached_response = CachedResponse(
+            cache_key=cache_key,
+            response_text=text,
+            response_metadata_json=metadata.as_string,
+            etag=metadata.etag,
+            last_modified=metadata.last_modified,
+            expires_at=metadata.expires_at,
+            cache_timestamp=Instant.now().timestamp_nanos(),
+        )
         self._cached_response = cached_response
         self.updated.append((cache_key, cached_response))
+        return cached_response
 
-    async def update(self, cache_key: UUID, cached_response: CachedResponse) -> None:
+    async def update_304(
+        self, cache_key: UUID, metadata: ResponseMetadata
+    ) -> CachedResponse:
+        if self._cached_response is None:
+            raise KeyError(cache_key)
+
+        existing_metadata = ResponseMetadataRoot.model_validate_json(
+            self._cached_response.response_metadata_json
+        ).root
+        merged_metadata = merge_cached_revalidation_metadata(
+            cached=existing_metadata,
+            refreshed=metadata,
+        )
+
+        cached_response = CachedResponse(
+            cache_key=cache_key,
+            response_text=self._cached_response.response_text,
+            response_metadata_json=merged_metadata.as_string,
+            etag=merged_metadata.etag,
+            last_modified=merged_metadata.last_modified,
+            expires_at=merged_metadata.expires_at,
+            cache_timestamp=Instant.now().timestamp_nanos(),
+        )
         self._cached_response = cached_response
         self.updated.append((cache_key, cached_response))
+        return cached_response
 
     async def delete(self, cache_key: UUID) -> None:
         _ = cache_key
@@ -205,7 +246,7 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
             response_metadata_json=stale_metadata.as_string,
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
-            timestamped=Instant.now().timestamp_nanos(),
+            cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
         response_304 = _FakeHttpResponse(
@@ -234,6 +275,7 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
         )
 
         assert isinstance(result, Response304FromStaleCache)
+        assert result.metadata.status_code == 200
         assert result.text == "[1]"
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
@@ -268,7 +310,7 @@ def test_cacheable_request_applies_stale_headers_without_mutating_request() -> N
             response_metadata_json=stale_metadata.as_string,
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
-            timestamped=Instant.now().timestamp_nanos(),
+            cache_timestamp=Instant.now().timestamp_nanos(),
         )
         response_304 = _FakeHttpResponse(
             status_code=304,
@@ -294,6 +336,7 @@ def test_cacheable_request_applies_stale_headers_without_mutating_request() -> N
         )
 
         assert isinstance(result, Response304FromStaleCache)
+        assert result.metadata.status_code == 200
         assert original_request.headers == {"Accept": "application/json"}
         assert len(requester._client.calls) == 1  # pyright: ignore[reportPrivateUsage]
         assert requester._client.calls[0]["headers"] == {  # pyright: ignore[reportPrivateUsage]
@@ -322,7 +365,7 @@ def test_cacheable_request_returns_fresh_cache_hit() -> None:
             response_metadata_json=metadata.as_string,  # pyright: ignore[reportUnknownMemberType]
             etag='"abc"',
             expires_at=Instant.now().timestamp() + 60,
-            timestamped=Instant.now().timestamp_nanos(),
+            cache_timestamp=Instant.now().timestamp_nanos(),
         )
         requester, cache = _build_requester(
             responses=[],
@@ -360,7 +403,7 @@ def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
             response_metadata_json=stale_metadata.as_string,  # pyright: ignore[reportUnknownMemberType]
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
-            timestamped=Instant.now().timestamp_nanos(),
+            cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
         response_text, response_metadata = _build_metadata(
@@ -419,7 +462,7 @@ def test_cacheable_request_refreshes_stale_paged_entry_on_200() -> None:
             response_metadata_json=stale_metadata.as_string,  # pyright: ignore[reportUnknownMemberType]
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
-            timestamped=Instant.now().timestamp_nanos(),
+            cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
         first_page_response = _FakeHttpResponse(

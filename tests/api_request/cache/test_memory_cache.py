@@ -9,12 +9,13 @@ from whenever import Instant
 
 from api_request.cache.memory_cache import InMemoryCache
 from api_request.cache.models import CachedResponse
+from api_request.request.models import ResponseMetadata
 
 
 def _build_cached_response(
     *,
     expires_at: int | None = None,
-    timestamped: int | None = None,
+    cache_timestamp: int | None = None,
 ) -> CachedResponse:
     """Build a cached response for tests."""
     cache_key = uuid4()
@@ -23,9 +24,30 @@ def _build_cached_response(
         response_text="[]",
         response_metadata_json="{}",
         expires_at=expires_at,
-        timestamped=(
-            timestamped if timestamped is not None else Instant.now().timestamp_nanos()
+        cache_timestamp=(
+            cache_timestamp
+            if cache_timestamp is not None
+            else Instant.now().timestamp_nanos()
         ),
+    )
+
+
+def _build_metadata(*, etag: str | None = '"abc"') -> ResponseMetadata:
+    """Build response metadata with at least one cache validator."""
+    headers: list[tuple[str, str]] = [
+        ("Date", "Mon, 06 Jul 2026 18:00:00 GMT"),
+        ("Last-Modified", "Mon, 06 Jul 2026 17:00:00 GMT"),
+    ]
+    if etag is not None:
+        headers.append(("ETag", etag))
+    return ResponseMetadata(
+        status_code=200,
+        reason_phrase="OK",
+        url="https://example.invalid/data",
+        elapsed=10,
+        bytes_downloaded=2,
+        headers=tuple(headers),
+        received_timestamp=Instant.now().timestamp_nanos(),
     )
 
 
@@ -34,13 +56,13 @@ def test_in_memory_cache_supports_basic_crud() -> None:
 
     async def run() -> None:
         cache = InMemoryCache()
-        original = _build_cached_response()
-        updated = _build_cached_response(timestamped=original.timestamped + 1)
+        metadata = _build_metadata()
 
-        await cache.set(original.cache_key, original)
+        original = await cache.set(uuid4(), "[]", metadata)
         assert await cache.get(original.cache_key) == original
 
-        await cache.update(original.cache_key, updated)
+        updated = await cache.set(original.cache_key, "[1]", metadata)
+
         assert await cache.get(original.cache_key) == updated
 
         await cache.delete(original.cache_key)
@@ -60,20 +82,20 @@ def test_in_memory_cache_clear_filters_by_expiry_and_age() -> None:
 
         expired = _build_cached_response(
             expires_at=now_timestamp - 1,
-            timestamped=now_nanos - 1_000_000,
+            cache_timestamp=now_nanos - 1_000_000,
         )
         old_but_unexpired = _build_cached_response(
             expires_at=now_timestamp + 60,
-            timestamped=now_nanos - 1_000_000,
+            cache_timestamp=now_nanos - 1_000_000,
         )
         fresh = _build_cached_response(
             expires_at=now_timestamp + 60,
-            timestamped=now_nanos + 1_000_000_000,
+            cache_timestamp=now_nanos + 1_000_000_000,
         )
 
-        await cache.set(expired.cache_key, expired)
-        await cache.set(old_but_unexpired.cache_key, old_but_unexpired)
-        await cache.set(fresh.cache_key, fresh)
+        cache._entries[expired.cache_key] = expired  # pyright: ignore[reportPrivateUsage]
+        cache._entries[old_but_unexpired.cache_key] = old_but_unexpired  # pyright: ignore[reportPrivateUsage]
+        cache._entries[fresh.cache_key] = fresh  # pyright: ignore[reportPrivateUsage]
 
         await cache.clear(only_expired=True)
         assert await cache.get(expired.cache_key) is None
@@ -92,11 +114,8 @@ def test_in_memory_cache_reports_size_and_full_clear() -> None:
 
     async def run() -> None:
         cache = InMemoryCache()
-        first = _build_cached_response()
-        second = _build_cached_response()
-
-        await cache.set(first.cache_key, first)
-        await cache.set(second.cache_key, second)
+        first = await cache.set(uuid4(), "[]", _build_metadata())
+        second = await cache.set(uuid4(), "[]", _build_metadata())
         assert await cache.cache_info() == type(await cache.cache_info())(size=2)
 
         await cache.flush()

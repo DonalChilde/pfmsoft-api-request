@@ -69,6 +69,7 @@ import asyncio
 import logging
 from collections.abc import Hashable
 from dataclasses import replace
+from time import perf_counter
 from types import TracebackType
 from typing import Any, Self, cast
 from uuid import UUID
@@ -256,7 +257,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             response_metadata_json=metadata.as_string,
             etag=etag if etag is not None else metadata.etag,
             expires_at=metadata.expires_at,
-            timestamped=Instant.now().timestamp_nanos(),
+            cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
     @staticmethod
@@ -467,11 +468,8 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             if isinstance(response, SuccessfulResponseBase):
                 await cache.set(
                     request.cache_key,
-                    self._as_cached_response(
-                        cache_key=request.cache_key,
-                        text=response.text,
-                        metadata=response.metadata,
-                    ),
+                    response.text,
+                    response.metadata,
                 )
             return response
 
@@ -500,25 +498,21 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
         match refreshed.metadata.status_code:
             case 304:
-                metadata_refresh = self._as_cached_response(
-                    cache_key=request.cache_key,
-                    text=cached_response.response_text,
-                    metadata=refreshed.metadata,
-                    etag=cached_response.etag,
+                refreshed_cached_response = await cache.update_304(
+                    request.cache_key,
+                    refreshed.metadata,
                 )
-                await cache.update(request.cache_key, metadata_refresh)
                 return Response304FromStaleCache(
                     request=request.request,
-                    metadata=refreshed.metadata,
-                    text=cached_response.response_text,
+                    metadata=self._cached_metadata(refreshed_cached_response),
+                    text=refreshed_cached_response.response_text,
                 )
             case 200:
-                replacement = self._as_cached_response(
-                    cache_key=request.cache_key,
-                    text=refreshed.text,
-                    metadata=refreshed.metadata,
+                await cache.set(
+                    request.cache_key,
+                    refreshed.text,
+                    refreshed.metadata,
                 )
-                await cache.update(request.cache_key, replacement)
                 return Response200FromStaleCache(
                     request=request.request,
                     metadata=refreshed.metadata,
@@ -544,7 +538,15 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             return response
 
         paged_responses: list[SuccessfulResponseBase[T]] = []
+        pages_start = perf_counter()
         page_responses = await self._gather_paged_responses(response)
+        pages_end = perf_counter()
+        logger.info(
+            "Fetched %d pages for request %s in %.2f seconds",
+            total_pages,
+            response.request.url,
+            pages_end - pages_start,
+        )
         for page_response in page_responses:
             if isinstance(page_response, FailedRequestBase):
                 return page_response
@@ -578,15 +580,14 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         self, response: SuccessfulResponse[T]
     ) -> list[SuccessfulResponseBase[T] | FailedRequestBase[T]]:
         """Fetch all additional pages for a paged response concurrently."""
-        return await asyncio.gather(
-            *(
-                self._http_request(
-                    self._build_paged_request(response, page_number),
-                    allow_pagination=False,
-                )
-                for page_number in range(2, response.metadata.pages + 1)
+        tasks = (
+            self._http_request(
+                self._build_paged_request(response, page_number),
+                allow_pagination=False,
             )
+            for page_number in range(2, response.metadata.pages + 1)
         )
+        return await asyncio.gather(*tasks)
 
     @staticmethod
     def _build_paged_request(
