@@ -17,7 +17,9 @@ from api_request.request import (
     Source,
     _CachableRequest,
     _FailWithResponse,
+    _Response_200_FromStaleCache,
     _Response_304_FromStaleCache,
+    _SuccessfulResponse,
     _UnprocessedRequest,
 )
 
@@ -122,6 +124,31 @@ def _build_requester(
     return requester, cache
 
 
+def _build_metadata(
+    *,
+    status_code: int,
+    text: str,
+    last_modified: str,
+    pages: int = 1,
+    reason_phrase: str = "OK",
+) -> tuple[str, object]:
+    response = _FakeHttpResponse(
+        status_code=status_code,
+        reason_phrase=reason_phrase,
+        url="https://example.invalid/data",
+        text=text,
+        headers={
+            "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+            "Last-Modified": last_modified,
+            "X-Pages": str(pages),
+        },
+        content=text.encode("utf-8"),
+        elapsed=timedelta(milliseconds=5),
+    )
+    metadata = ApiRequester._http_response_to_metadata(response)  # pyright: ignore[reportPrivateUsage]
+    return text, metadata
+
+
 def test_http_request_uses_expected_success_statuses_for_304() -> None:
     """The HTTP helper should allow explicit success overrides for revalidation."""
 
@@ -211,6 +238,103 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
     asyncio.run(run())
 
 
+def test_cacheable_request_returns_fresh_cache_hit() -> None:
+    """An unexpired cached response should return directly without network refresh."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        response_text, metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=1,
+        )
+        cached_response = CachedResponse(
+            cache_key=cache_key,
+            response_text=response_text,
+            response_metadata_json=metadata.as_bytes,  # pyright: ignore[reportUnknownMemberType]
+            etag='"abc"',
+            expires_at=Instant.now().timestamp() + 60,
+            timestamped=Instant.now().timestamp_nanos(),
+        )
+        requester, cache = _build_requester(
+            responses=[],
+            cached_response=cached_response,
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            _CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, _SuccessfulResponse)
+        assert result.source == Source.CACHE
+        assert result.text == "[1]"
+        assert len(cache.updated) == 0
+
+    asyncio.run(run())
+
+
+def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
+    """A stale cache revalidation returning 200 should replace cached content."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        stale_text, stale_metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=1,
+        )
+        stale_cached = CachedResponse(
+            cache_key=cache_key,
+            response_text=stale_text,
+            response_metadata_json=stale_metadata.as_bytes,  # pyright: ignore[reportUnknownMemberType]
+            etag='"abc"',
+            expires_at=Instant.now().timestamp() - 1,
+            timestamped=Instant.now().timestamp_nanos(),
+        )
+
+        response_text, response_metadata = _build_metadata(
+            status_code=200,
+            text="[2]",
+            last_modified="Mon, 06 Jul 2026 17:30:00 GMT",
+            pages=1,
+        )
+        requester, cache = _build_requester(
+            responses=[
+                _FakeHttpResponse(
+                    status_code=200,
+                    reason_phrase="OK",
+                    url="https://example.invalid/data",
+                    text=response_text,
+                    headers={
+                        "Date": "Mon, 06 Jul 2026 18:05:00 GMT",
+                        "Last-Modified": "Mon, 06 Jul 2026 17:30:00 GMT",
+                        "X-Pages": "1",
+                    },
+                    content=response_text.encode("utf-8"),
+                    elapsed=timedelta(milliseconds=11),
+                )
+            ],
+            cached_response=stale_cached,
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            _CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, _Response_200_FromStaleCache)
+        assert result.text == "[2]"
+        assert len(cache.updated) == 1
+        assert cache.updated[0][0] == cache_key
+
+    asyncio.run(run())
+
+
 def test_http_request_uses_fail_with_response_for_404() -> None:
     """Configured recoverable statuses should map to failure-with-response."""
 
@@ -269,6 +393,97 @@ def test_http_request_uses_fail_with_response_for_503() -> None:
 
         assert isinstance(result, _FailWithResponse)
         assert result.metadata.status_code == 503
+
+    asyncio.run(run())
+
+
+def test_handle_paged_response_merges_json_lists() -> None:
+    """Paged responses should merge JSON list bodies in order."""
+
+    async def run() -> None:
+        first_text, first_metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=2,
+        )
+        second_text, second_metadata = _build_metadata(
+            status_code=200,
+            text="[2]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=1,
+        )
+        requester, _ = _build_requester(
+            responses=[
+                _FakeHttpResponse(
+                    status_code=200,
+                    reason_phrase="OK",
+                    url="https://example.invalid/data",
+                    text=second_text,
+                    headers={
+                        "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                        "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                        "X-Pages": "1",
+                    },
+                    content=second_text.encode("utf-8"),
+                    elapsed=timedelta(milliseconds=5),
+                )
+            ]
+        )
+        request = _build_request()
+        paged = _SuccessfulResponse(
+            request=request,
+            metadata=first_metadata,
+            text=first_text,
+            source=Source.NETWORK,
+        )
+
+        result = await requester._handle_paged_response(paged)  # pyright: ignore[reportPrivateUsage]
+
+        assert isinstance(result, _SuccessfulResponse)
+        assert result.text == "[1, 2]"
+
+    asyncio.run(run())
+
+
+def test_handle_paged_response_fails_on_source_drift() -> None:
+    """Paged responses should fail when later pages change source metadata."""
+
+    async def run() -> None:
+        first_text, first_metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=2,
+        )
+        requester, _ = _build_requester(
+            responses=[
+                _FakeHttpResponse(
+                    status_code=200,
+                    reason_phrase="OK",
+                    url="https://example.invalid/data",
+                    text="[2]",
+                    headers={
+                        "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                        "Last-Modified": "Mon, 06 Jul 2026 17:30:00 GMT",
+                        "X-Pages": "1",
+                    },
+                    content=b"[2]",
+                    elapsed=timedelta(milliseconds=5),
+                )
+            ]
+        )
+        request = _build_request()
+        paged = _SuccessfulResponse(
+            request=request,
+            metadata=first_metadata,
+            text=first_text,
+            source=Source.NETWORK,
+        )
+
+        result = await requester._handle_paged_response(paged)  # pyright: ignore[reportPrivateUsage]
+
+        assert result.__class__.__name__ == "_FailNoResponse"
 
     asyncio.run(run())
 

@@ -216,6 +216,22 @@ class _RequestFromStaleCache[T: Hashable](_CachableRequest[T]):
 
     etag: str | None
     """The ETag of the cached response."""
+    last_modified: str | None = None
+    """The Last-Modified header of the cached response, if available."""
+
+    @property
+    def conditional_headers(self) -> dict[str, str]:
+        """Return the conditional headers for the request based on ETag and Last-Modified."""
+        headers: dict[str, str] = {}
+        if not self.etag and not self.last_modified:
+            raise ValueError(
+                "At least one of ETag or Last-Modified must be provided for a stale cache request."
+            )
+        if self.etag:
+            headers["If-None-Match"] = self.etag
+        if self.last_modified:
+            headers["If-Modified-Since"] = self.last_modified
+        return headers
 
 
 @dataclass(slots=True, kw_only=True)
@@ -463,33 +479,33 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         intermediate_responses = await self._dispatch_requests(requests)
 
         responses: dict[UUID, Response[T] | FailedResponse[T]] = {}
-        # prefer the use of match case
         for request_id, intermediate in intermediate_responses.items():
-            if isinstance(intermediate, _SuccessfulResponseBase):
-                responses[request_id] = Response(
-                    metadata=intermediate.metadata,
-                    text=intermediate.text,
-                    request=intermediate.request,
-                )
-            elif isinstance(intermediate, _FailWithResponse):
-                responses[request_id] = FailedResponse(
-                    metadata=intermediate.metadata,
-                    text=intermediate.text,
-                    request=intermediate.request,
-                    error_messages=[
-                        f"HTTP {intermediate.metadata.status_code} {intermediate.metadata.reason_phrase}"
-                    ],
-                )
-            elif isinstance(intermediate, _FailNoResponse):
-                responses[request_id] = FailedResponse(
-                    request=intermediate.request,
-                    error_messages=[intermediate.error_message],
-                )
-            else:
-                responses[request_id] = FailedResponse(
-                    request=requests[request_id],
-                    error_messages=["Unknown intermediate response type"],
-                )
+            match intermediate:
+                case _SuccessfulResponseBase():
+                    responses[request_id] = Response(
+                        metadata=intermediate.metadata,
+                        text=intermediate.text,
+                        request=intermediate.request,
+                    )
+                case _FailWithResponse():
+                    responses[request_id] = FailedResponse(
+                        metadata=intermediate.metadata,
+                        text=intermediate.text,
+                        request=intermediate.request,
+                        error_messages=[
+                            f"HTTP {intermediate.metadata.status_code} {intermediate.metadata.reason_phrase}"
+                        ],
+                    )
+                case _FailNoResponse():
+                    responses[request_id] = FailedResponse(
+                        request=intermediate.request,
+                        error_messages=[intermediate.error_message],
+                    )
+                case _:
+                    responses[request_id] = FailedResponse(
+                        request=requests[request_id],
+                        error_messages=["Unknown intermediate response type"],
+                    )
         return responses
 
     async def _dispatch_requests(
@@ -564,12 +580,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                 return await self._handle_paged_response(success)
             return success
 
-        if self._is_recoverable_status(status_code):
-            return _FailWithResponse(
-                request=request.request, metadata=metadata, text=text
-            )
-
-        if self._is_unrecoverable_status(status_code):
+        if self._is_known_failure_status(status_code):
             return _FailWithResponse(
                 request=request.request, metadata=metadata, text=text
             )
@@ -613,14 +624,14 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         if cached_metadata.last_modified:
             conditional_headers["If-Modified-Since"] = cached_metadata.last_modified
 
-        stale_request_model = self._updated_request_headers(
-            request.request,
-            **conditional_headers,
-        )
         stale_request = _RequestFromStaleCache(
-            request=stale_request_model,
+            request=replace(
+                request.request,
+                headers={**request.request.headers, **conditional_headers},
+            ),
             cache_key=request.cache_key,
             etag=cached_response.etag,
+            last_modified=cached_metadata.last_modified,
         )
         refreshed = await self._http_request(
             stale_request,
