@@ -22,9 +22,9 @@ class CachedResponse:
     last_modified: str | None = None
     """The Last-Modified header value of the HTTP response, if present."""
     expires_at: int | None = None
-    """The instant when the cached response expires and should be considered stale."""
+    """The instant in seconds when the cached response expires and should be considered stale."""
     timestamped: int
-    """The instant when the response was cached."""
+    """The instant in nanoseconds when the response was cached."""
 
     @property
     def is_expired(self) -> bool:
