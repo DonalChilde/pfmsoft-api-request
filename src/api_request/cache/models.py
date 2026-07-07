@@ -23,7 +23,7 @@ class CachedResponse:
     """The Last-Modified header value of the HTTP response, if present."""
     expires_at: int | None = None
     """The instant in seconds when the cached response expires and should be considered stale."""
-    timestamped: int
+    cache_timestamp: int
     """The instant in nanoseconds when the response was cached."""
 
     @property
@@ -36,7 +36,7 @@ class CachedResponse:
     @property
     def cache_age(self) -> int:
         """Calculate the age of the cached response in nanoseconds."""
-        return Instant.now().timestamp_nanos() - self.timestamped
+        return Instant.now().timestamp_nanos() - self.cache_timestamp
 
 
 class CachedResponseStatus(StrEnum):

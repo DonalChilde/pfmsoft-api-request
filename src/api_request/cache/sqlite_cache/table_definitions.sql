@@ -10,6 +10,7 @@
 -- etag is the ETag header value from the response, if present, stored as TEXT
 -- last_modified is the Last-Modified header value from the response, if present, stored as TEXT
 -- expires_at is the expiration time of the cached response, stored as a Unix timestamp in seconds, if present
+-- cache_timestamp is the time when the response was cached or last updated, stored as a Unix timestamp in nanoseconds
 CREATE TABLE IF NOT EXISTS WebCache (
     ID INTEGER PRIMARY KEY AUTOINCREMENT,
     cache_key TEXT NOT NULL UNIQUE,
@@ -18,5 +19,5 @@ CREATE TABLE IF NOT EXISTS WebCache (
     etag TEXT,
     last_modified TEXT,
     expires_at INTEGER,
-    timestamped INTEGER NOT NULL
+    cache_timestamp INTEGER NOT NULL
 );

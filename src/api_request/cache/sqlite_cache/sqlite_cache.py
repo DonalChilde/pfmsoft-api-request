@@ -8,6 +8,8 @@ from uuid import UUID
 
 from whenever import Instant
 
+from ...request.models import ResponseMetadata, ResponseMetadataRoot
+from ..metadata_helpers import merge_cached_revalidation_metadata
 from ..models import CachedResponse, CacheInfo
 from ..protocols import CacheFactoryProtocol, CacheProtocol
 from . import query_helpers
@@ -33,18 +35,23 @@ class SqliteCache(CacheProtocol):
 
         Notes:
             When initialized with a path, a read-write connection is created and
-            closed automatically on context manager exit. When initialized with
-            an existing connection, that connection is never closed by this class.
+            closed automatically via the context manager.
+
+            When initialized with an existing connection, that connection is never
+            closed by this class.
         """
         if isinstance(db, sqlite3.Connection):
             self._connection = db
             self._close_connection_on_exit = False
+            self._connection_path: Path | None = None
         else:
-            self._connection = create_read_write_connection(db)
-            self._close_connection_on_exit = True
+            self._connection_path = Path(db)
 
     async def __aenter__(self) -> Self:
         """Enter the asynchronous context manager."""
+        if self._connection_path is not None:
+            self._connection = create_read_write_connection(self._connection_path)
+            self._close_connection_on_exit = True
         return self
 
     async def __aexit__(
@@ -62,21 +69,74 @@ class SqliteCache(CacheProtocol):
         """Get a cached response by cache key."""
         return query_helpers.query_cached_response(self._connection, str(cache_key))
 
-    async def set(self, cache_key: UUID, cached_response: CachedResponse) -> None:
-        """Set a cached response in the cache."""
-        query_helpers.write_cached_response(
-            self._connection,
-            str(cache_key),
-            cached_response,
+    @staticmethod
+    def _ensure_validators(metadata: ResponseMetadata) -> None:
+        """Ensure at least one cache validator is present."""
+        if metadata.etag is None and metadata.last_modified is None:
+            raise ValueError("Cached responses require etag or last_modified")
+
+    @staticmethod
+    def _build_cached_response(
+        *,
+        cache_key: UUID,
+        text: str,
+        metadata: ResponseMetadata,
+    ) -> CachedResponse:
+        """Build a CachedResponse from response text and metadata."""
+        SqliteCache._ensure_validators(metadata)
+        return CachedResponse(
+            cache_key=cache_key,
+            response_text=text,
+            response_metadata_json=metadata.as_string,
+            etag=metadata.etag,
+            last_modified=metadata.last_modified,
+            expires_at=metadata.expires_at,
+            cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
-    async def update(self, cache_key: UUID, cached_response: CachedResponse) -> None:
-        """Update an existing cached response in the cache."""
+    async def set(
+        self, cache_key: UUID, text: str, metadata: ResponseMetadata
+    ) -> CachedResponse:
+        """Set or replace a cached response in the cache."""
+        cached_response = self._build_cached_response(
+            cache_key=cache_key,
+            text=text,
+            metadata=metadata,
+        )
         query_helpers.write_cached_response(
             self._connection,
             str(cache_key),
             cached_response,
         )
+        return cached_response
+
+    async def update_304(
+        self, cache_key: UUID, metadata: ResponseMetadata
+    ) -> CachedResponse:
+        """Update cached metadata after a 304 response while preserving body text."""
+        existing = await self.get(cache_key)
+        if existing is None:
+            raise KeyError(f"No cached response found for key {cache_key}")
+
+        existing_metadata = ResponseMetadataRoot.model_validate_json(
+            existing.response_metadata_json
+        ).root
+        merged_metadata = merge_cached_revalidation_metadata(
+            cached=existing_metadata,
+            refreshed=metadata,
+        )
+
+        cached_response = self._build_cached_response(
+            cache_key=cache_key,
+            text=existing.response_text,
+            metadata=merged_metadata,
+        )
+        query_helpers.write_cached_response(
+            self._connection,
+            str(cache_key),
+            cached_response,
+        )
+        return cached_response
 
     async def delete(self, cache_key: UUID) -> None:
         """Delete a cached response from the cache."""
@@ -106,10 +166,10 @@ class SqliteCache(CacheProtocol):
 
         if age_limit is not None:
             cutoff = Instant.now().timestamp_nanos() - age_limit
-            clauses.append("timestamped <= ?")
+            clauses.append("cache_timestamp <= ?")
             params.append(cutoff)
 
-        where_clause = " OR ".join(clauses)
+        where_clause = " AND ".join(clauses)
         query = f"DELETE FROM WebCache WHERE {where_clause}"
         with self._connection:
             self._connection.execute(query, tuple(params))

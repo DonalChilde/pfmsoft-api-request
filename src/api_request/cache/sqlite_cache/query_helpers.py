@@ -25,7 +25,7 @@ def write_cached_response(
             etag,
             last_modified,
             expires_at,
-            timestamped
+            cache_timestamp
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(cache_key) DO UPDATE SET
             response_text = excluded.response_text,
@@ -33,7 +33,7 @@ def write_cached_response(
             etag = excluded.etag,
             last_modified = excluded.last_modified,
             expires_at = excluded.expires_at,
-            timestamped = excluded.timestamped
+            cache_timestamp = excluded.cache_timestamp
     """
 
     with connection:
@@ -46,7 +46,7 @@ def write_cached_response(
                 cached_response.etag,
                 cached_response.last_modified,
                 cached_response.expires_at,
-                cached_response.timestamped,
+                cached_response.cache_timestamp,
             ),
         )
 
@@ -63,7 +63,7 @@ def query_cached_response(
             etag,
             last_modified,
             expires_at,
-            timestamped
+            cache_timestamp
         FROM WebCache
         WHERE cache_key = ?
     """
@@ -79,7 +79,7 @@ def query_cached_response(
         etag=row["etag"],
         last_modified=row["last_modified"],
         expires_at=row["expires_at"],
-        timestamped=row["timestamped"],
+        cache_timestamp=row["cache_timestamp"],
     )
 
 
@@ -88,6 +88,3 @@ def delete_cached_response(connection: sqlite3.Connection, cache_key: str) -> No
     query = "DELETE FROM WebCache WHERE cache_key = ?"
     with connection:
         connection.execute(query, (cache_key,))
-
-
-# TODO querys as required for other operations. TBD
