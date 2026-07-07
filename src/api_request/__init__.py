@@ -17,5 +17,6 @@ __url__ = "https://github.com/DonalChilde/api-request"
 __license__ = "MIT"
 
 from .request.api_requester import ApiRequester
+from .request.models import Request, Response
 
-__all__ = ["ApiRequester"]
+__all__ = ["ApiRequester", "Request", "Response"]
