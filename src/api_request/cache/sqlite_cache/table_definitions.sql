@@ -5,16 +5,16 @@
 
 -- The WebCache table stores cached responses from web endpoints.
 -- cache_key is a unique string identifier for the cached response.
--- response_text is the raw text of the response, stored as bytes for efficient retrieval
--- response_metadata_json is the metadata of the response (status code, headers, etc.) stored as JSON in a BLOB
+-- response_text is the raw text of the response, stored as TEXT for efficient retrieval
+-- response_metadata_json is the metadata of the response (status code, headers, etc.) stored as JSON in a TEXT
 -- etag is the ETag header value from the response, if present, stored as TEXT
 -- last_modified is the Last-Modified header value from the response, if present, stored as TEXT
 -- expires_at is the expiration time of the cached response, stored as a Unix timestamp in seconds, if present
 CREATE TABLE IF NOT EXISTS WebCache (
     ID INTEGER PRIMARY KEY AUTOINCREMENT,
     cache_key TEXT NOT NULL UNIQUE,
-    response_text BLOB NOT NULL,
-    response_metadata_json BLOB NOT NULL,
+    response_text TEXT NOT NULL,
+    response_metadata_json TEXT NOT NULL,
     etag TEXT,
     last_modified TEXT,
     expires_at INTEGER,

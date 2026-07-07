@@ -229,7 +229,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     @staticmethod
     def _cached_metadata(cached_response: CachedResponse) -> ResponseMetadata:
-        """Decode cached metadata bytes into a ResponseMetadata model."""
+        """Decode cached metadata JSON text into a ResponseMetadata model."""
         return ResponseMetadataRoot.model_validate_json(
             cached_response.response_metadata_json
         ).root
@@ -253,7 +253,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         return CachedResponse(
             cache_key=cache_key,
             response_text=text,
-            response_metadata_json=metadata.as_bytes,
+            response_metadata_json=metadata.as_string,
             etag=etag if etag is not None else metadata.etag,
             expires_at=metadata.expires_at,
             timestamped=Instant.now().timestamp_nanos(),

@@ -202,7 +202,7 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text="[1]",
-            response_metadata_json=stale_metadata.as_bytes,
+            response_metadata_json=stale_metadata.as_string,
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             timestamped=Instant.now().timestamp_nanos(),
@@ -265,7 +265,7 @@ def test_cacheable_request_applies_stale_headers_without_mutating_request() -> N
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text="[1]",
-            response_metadata_json=stale_metadata.as_bytes,
+            response_metadata_json=stale_metadata.as_string,
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             timestamped=Instant.now().timestamp_nanos(),
@@ -319,7 +319,7 @@ def test_cacheable_request_returns_fresh_cache_hit() -> None:
         cached_response = CachedResponse(
             cache_key=cache_key,
             response_text=response_text,
-            response_metadata_json=metadata.as_bytes,  # pyright: ignore[reportUnknownMemberType]
+            response_metadata_json=metadata.as_string,  # pyright: ignore[reportUnknownMemberType]
             etag='"abc"',
             expires_at=Instant.now().timestamp() + 60,
             timestamped=Instant.now().timestamp_nanos(),
@@ -357,7 +357,7 @@ def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text=stale_text,
-            response_metadata_json=stale_metadata.as_bytes,  # pyright: ignore[reportUnknownMemberType]
+            response_metadata_json=stale_metadata.as_string,  # pyright: ignore[reportUnknownMemberType]
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             timestamped=Instant.now().timestamp_nanos(),
@@ -416,7 +416,7 @@ def test_cacheable_request_refreshes_stale_paged_entry_on_200() -> None:
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text=stale_text,
-            response_metadata_json=stale_metadata.as_bytes,  # pyright: ignore[reportUnknownMemberType]
+            response_metadata_json=stale_metadata.as_string,  # pyright: ignore[reportUnknownMemberType]
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             timestamped=Instant.now().timestamp_nanos(),

@@ -21,7 +21,7 @@ def _build_cached_response(
     return CachedResponse(
         cache_key=cache_key,
         response_text="[]",
-        response_metadata_json=b"{}",
+        response_metadata_json="{}",
         expires_at=expires_at,
         timestamped=(
             timestamped if timestamped is not None else Instant.now().timestamp_nanos()

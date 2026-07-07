@@ -15,8 +15,8 @@ class CachedResponse:
     """The UUID key for the cached response."""
     response_text: str
     """The text of the HTTP response."""
-    response_metadata_json: bytes
-    """The JSON-encoded bytes of the HTTP response metadata."""
+    response_metadata_json: str
+    """The JSON-encoded string of the HTTP response metadata."""
     etag: str | None = None
     """The ETag header value of the HTTP response, if present."""
     last_modified: str | None = None

@@ -105,9 +105,9 @@ class ResponseMetadata:
             )
 
     @property
-    def as_bytes(self) -> bytes:
-        """Get the response metadata as JSON-encoded bytes."""
-        return ResponseMetadataRoot(self).model_dump_json().encode("utf-8")
+    def as_string(self) -> str:
+        """Get the response metadata as a JSON string."""
+        return ResponseMetadataRoot(self).model_dump_json()
 
     @property
     def headers_lower(self) -> dict[str, str]:
