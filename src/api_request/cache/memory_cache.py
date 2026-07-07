@@ -9,7 +9,7 @@ from typing import Self
 from uuid import UUID
 
 from .models import CachedResponse, CacheInfo
-from .protocols import CacheProtocol
+from .protocols import CacheFactoryProtocol, CacheProtocol
 
 
 class InMemoryCache(CacheProtocol):
@@ -87,3 +87,15 @@ class InMemoryCache(CacheProtocol):
     async def cache_info(self) -> CacheInfo:
         """Return summary information about the cache."""
         return CacheInfo(size=len(self._entries))
+
+
+class InMemoryCacheFactory(CacheFactoryProtocol):
+    """Factory for creating InMemoryCache instances.
+
+    The InMemoryCache class takes no arguments, so this factory simply returns a new
+    instance of InMemoryCache.
+    """
+
+    def __call__(self) -> CacheProtocol:
+        """Create a new InMemoryCache instance."""
+        return InMemoryCache()

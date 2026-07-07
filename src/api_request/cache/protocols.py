@@ -54,3 +54,17 @@ class CacheProtocol(Protocol):
 
 
 CacheFactory = Callable[[], CacheProtocol]
+
+
+class CacheFactoryProtocol(Protocol):
+    """A protocol for a cache factory that produces instances of CacheProtocol.
+
+    This protocol defines a callable that returns a new instance of a cache provider
+    that adheres to the CacheProtocol. It is used to create cache instances for use
+    with the ApiRequester, allowing for different caching strategies to be implemented
+    and swapped as needed.
+    """
+
+    def __call__(self) -> CacheProtocol:
+        """Build and return a configured cache instance."""
+        ...

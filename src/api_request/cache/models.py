@@ -19,6 +19,8 @@ class CachedResponse:
     """The JSON-encoded bytes of the HTTP response metadata."""
     etag: str | None = None
     """The ETag header value of the HTTP response, if present."""
+    last_modified: str | None = None
+    """The Last-Modified header value of the HTTP response, if present."""
     expires_at: int | None = None
     """The instant when the cached response expires and should be considered stale."""
     timestamped: int
