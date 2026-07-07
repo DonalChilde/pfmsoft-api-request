@@ -6,6 +6,7 @@ from typing import Protocol, Self
 from uuid import UUID
 
 from api_request.cache.models import CachedResponse, CacheInfo
+from api_request.request.models import ResponseMetadata
 
 
 class CacheProtocol(Protocol):
@@ -32,6 +33,12 @@ class CacheProtocol(Protocol):
 
     async def update(self, cache_key: UUID, cached_response: CachedResponse) -> None:
         """Update an existing cached response in the cache."""
+        ...
+
+    async def update_304(
+        self, cache_key: UUID, cached_response: CachedResponse
+    ) -> None:
+        """Update an existing cached response in the cache with a 304 Not Modified response."""
         ...
 
     async def delete(self, cache_key: UUID) -> None:

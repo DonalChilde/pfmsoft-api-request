@@ -88,3 +88,6 @@ def delete_cached_response(connection: sqlite3.Connection, cache_key: str) -> No
     query = "DELETE FROM WebCache WHERE cache_key = ?"
     with connection:
         connection.execute(query, (cache_key,))
+
+
+# TODO querys as required for other operations. TBD
