@@ -9,6 +9,7 @@ from datetime import timedelta
 from types import SimpleNamespace, TracebackType
 from uuid import UUID, uuid4
 
+import pytest
 from whenever import Instant
 
 from api_request.cache.metadata_helpers import merge_cached_revalidation_metadata
@@ -793,5 +794,614 @@ def test_process_requests_maps_intermediate_results() -> None:
         assert request_key in results.successful
         assert results.successful[request_key].request == request
         assert not results.failed
+
+    asyncio.run(run())
+
+
+def test_process_requests_maps_failures_and_unknown_intermediate() -> None:
+    """Failing and unknown intermediate results should map to failed outputs."""
+
+    async def run() -> None:
+        first_key = uuid4()
+        second_key = uuid4()
+        third_key = uuid4()
+        first_request = _build_request()
+        second_request = _build_request()
+        third_request = _build_request()
+        request_map = {
+            first_key: first_request,
+            second_key: second_request,
+            third_key: third_request,
+        }
+
+        metadata = ApiRequester._http_response_to_metadata(  # pyright: ignore[reportPrivateUsage]
+            _FakeHttpResponse(
+                status_code=404,
+                reason_phrase="Not Found",
+                url="https://example.invalid/data",
+                text='{"error": "missing"}',
+                headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+                content=b'{"error": "missing"}',
+                elapsed=timedelta(milliseconds=3),
+            )
+        )
+
+        requester, _ = _build_requester(responses=[])
+
+        async def fake_dispatch(_: dict[UUID, Request]):
+            return {
+                first_key: FailWithResponse(
+                    request=first_request,
+                    metadata=metadata,
+                    json={"error": "missing"},
+                ),
+                second_key: FailNoResponse(
+                    request=second_request,
+                    error_message="transport error",
+                ),
+                third_key: UnprocessedRequest(request=third_request),
+            }
+
+        requester._dispatch_requests = fake_dispatch  # pyright: ignore[reportPrivateUsage]
+
+        results = await requester.process_requests(request_map)
+
+        assert first_key in results.failed
+        assert results.failed[first_key].error_messages == ["HTTP 404 Not Found"]
+        assert second_key in results.failed
+        assert results.failed[second_key].error_messages == ["transport error"]
+        assert third_key in results.failed
+        assert results.failed[third_key].error_messages == [
+            "Unknown intermediate response type"
+        ]
+
+    asyncio.run(run())
+
+
+def test_cacheable_request_cache_miss_caches_successful_network_result() -> None:
+    """Cache-miss success should persist the response in cache before returning."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        requester, cache = _build_requester(
+            responses=[
+                _FakeHttpResponse(
+                    status_code=200,
+                    reason_phrase="OK",
+                    url="https://example.invalid/data",
+                    text='{"ok": true}',
+                    headers={
+                        "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                        "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                        "ETag": '"abc"',
+                    },
+                    content=b'{"ok": true}',
+                    elapsed=timedelta(milliseconds=6),
+                )
+            ]
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, SuccessfulResponse)
+        assert len(cache.updated) == 1
+        assert cache.updated[0][0] == cache_key
+
+    asyncio.run(run())
+
+
+def test_cacheable_request_returns_failed_refresh_result_directly() -> None:
+    """Stale-cache revalidation failures should be returned unchanged."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        stale_metadata = ApiRequester._http_response_to_metadata(  # pyright: ignore[reportPrivateUsage]
+            _FakeHttpResponse(
+                status_code=200,
+                reason_phrase="OK",
+                url="https://example.invalid/data",
+                text='{"ok": true}',
+                headers={
+                    "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                    "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                    "ETag": '"abc"',
+                },
+                content=b'{"ok": true}',
+                elapsed=timedelta(milliseconds=5),
+            )
+        )
+        stale_cached = CachedResponse(
+            cache_key=cache_key,
+            response_text='{"ok": true}',
+            response_metadata_json=stale_metadata.as_string,
+            etag='"abc"',
+            expires_at=Instant.now().timestamp() - 1,
+            cache_timestamp=Instant.now().timestamp_nanos(),
+        )
+        requester, _ = _build_requester(
+            responses=[
+                _FakeHttpResponse(
+                    status_code=404,
+                    reason_phrase="Not Found",
+                    url="https://example.invalid/data",
+                    text='{"error": "missing"}',
+                    headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+                    content=b'{"error": "missing"}',
+                    elapsed=timedelta(milliseconds=7),
+                )
+            ],
+            cached_response=stale_cached,
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, FailWithResponse)
+        assert result.metadata.status_code == 404
+
+    asyncio.run(run())
+
+
+def test_cacheable_request_marks_unexpected_2xx_revalidation_as_failed() -> None:
+    """Stale-cache 2xx statuses other than 200 should map to failed response."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        stale_metadata = ApiRequester._http_response_to_metadata(  # pyright: ignore[reportPrivateUsage]
+            _FakeHttpResponse(
+                status_code=200,
+                reason_phrase="OK",
+                url="https://example.invalid/data",
+                text='{"ok": true}',
+                headers={
+                    "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                    "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                    "ETag": '"abc"',
+                },
+                content=b'{"ok": true}',
+                elapsed=timedelta(milliseconds=5),
+            )
+        )
+        stale_cached = CachedResponse(
+            cache_key=cache_key,
+            response_text='{"ok": true}',
+            response_metadata_json=stale_metadata.as_string,
+            etag='"abc"',
+            expires_at=Instant.now().timestamp() - 1,
+            cache_timestamp=Instant.now().timestamp_nanos(),
+        )
+        requester, _ = _build_requester(
+            responses=[
+                _FakeHttpResponse(
+                    status_code=206,
+                    reason_phrase="Partial Content",
+                    url="https://example.invalid/data",
+                    text='{"ok": true}',
+                    headers={
+                        "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                        "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+                    },
+                    content=b'{"ok": true}',
+                    elapsed=timedelta(milliseconds=7),
+                )
+            ],
+            cached_response=stale_cached,
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, FailWithResponse)
+        assert result.metadata.status_code == 206
+
+    asyncio.run(run())
+
+
+def test_http_request_raises_for_fatal_transport_errors() -> None:
+    """RuntimeError transport failures should be re-raised as fatal."""
+
+    async def run() -> None:
+        requester, _ = _build_requester(responses=[])
+
+        async def raising_request(**_: object) -> _FakeHttpResponse:
+            raise RuntimeError("fatal transport")
+
+        requester._client.request = raising_request  # pyright: ignore[reportPrivateUsage]
+
+        with pytest.raises(RuntimeError, match="fatal transport"):
+            await requester._http_request(  # pyright: ignore[reportPrivateUsage]
+                UnprocessedRequest(request=_build_request()),
+                allow_pagination=False,
+            )
+
+    asyncio.run(run())
+
+
+def test_http_request_returns_fail_no_response_for_invalid_json() -> None:
+    """Invalid JSON payloads should return FailNoResponse parse failures."""
+
+    async def run() -> None:
+        response = _FakeHttpResponse(
+            status_code=200,
+            reason_phrase="OK",
+            url="https://example.invalid/data",
+            text="{invalid-json",
+            headers={
+                "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+                "Last-Modified": "Mon, 06 Jul 2026 17:00:00 GMT",
+            },
+            content=b"{invalid-json",
+            elapsed=timedelta(milliseconds=5),
+        )
+        requester, _ = _build_requester(responses=[response])
+
+        result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
+            UnprocessedRequest(request=_build_request()),
+            allow_pagination=False,
+        )
+
+        assert isinstance(result, FailNoResponse)
+        assert "Failed to parse response JSON" in result.error_message
+
+    asyncio.run(run())
+
+
+def test_handle_paged_response_returns_original_for_single_page() -> None:
+    """Single-page successful responses should pass through unchanged."""
+
+    async def run() -> None:
+        requester, _ = _build_requester(responses=[])
+        _, metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=1,
+        )
+        request = _build_request()
+        response = SuccessfulResponse(
+            request=request,
+            metadata=metadata,
+            json=[1],
+            source=Source.NETWORK,
+        )
+
+        result = await requester._handle_paged_response(response)  # pyright: ignore[reportPrivateUsage]
+
+        assert result is response
+
+    asyncio.run(run())
+
+
+def test_handle_paged_response_short_circuits_on_failed_page() -> None:
+    """Paged merge should stop immediately when any page request fails."""
+
+    async def run() -> None:
+        requester, _ = _build_requester(responses=[])
+        _, metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=2,
+        )
+        request = _build_request()
+        response = SuccessfulResponse(
+            request=request,
+            metadata=metadata,
+            json=[1],
+            source=Source.NETWORK,
+        )
+        failed_page = FailNoResponse(request=request, error_message="page failed")
+
+        async def fake_gather(_: SuccessfulResponse):
+            return [failed_page]
+
+        requester._gather_paged_responses = fake_gather  # pyright: ignore[reportPrivateUsage]
+
+        result = await requester._handle_paged_response(response)  # pyright: ignore[reportPrivateUsage]
+
+        assert result is failed_page
+
+    asyncio.run(run())
+
+
+def test_handle_paged_response_returns_fail_when_merge_raises() -> None:
+    """Non-list payloads in paged merge should return FailNoResponse."""
+
+    async def run() -> None:
+        requester, _ = _build_requester(responses=[])
+        _, metadata = _build_metadata(
+            status_code=200,
+            text="[1]",
+            last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            pages=2,
+        )
+        request = _build_request()
+        first_response = SuccessfulResponse(
+            request=request,
+            metadata=metadata,
+            json={"not": "a list"},
+            source=Source.NETWORK,
+        )
+        next_page = SuccessfulResponse(
+            request=request,
+            metadata=metadata,
+            json=[2],
+            source=Source.NETWORK,
+        )
+
+        async def fake_gather(_: SuccessfulResponse):
+            return [next_page]
+
+        requester._gather_paged_responses = fake_gather  # pyright: ignore[reportPrivateUsage]
+
+        result = await requester._handle_paged_response(first_response)  # pyright: ignore[reportPrivateUsage]
+
+        assert isinstance(result, FailNoResponse)
+        assert "Paged response body is not a JSON list" in result.error_message
+
+    asyncio.run(run())
+
+
+def test_dispatch_requests_re_raises_fatal_exceptions() -> None:
+    """Dispatch should re-raise fatal exceptions from request execution."""
+
+    async def run() -> None:
+        requester, _ = _build_requester(responses=[])
+
+        async def fatal_http_request(
+            request: UnprocessedRequest,
+            *,
+            allow_pagination: bool = True,
+            expected_success_statuses: set[int] | None = None,
+        ) -> SuccessfulResponseBase | FailedRequestBase:
+            _ = request, allow_pagination, expected_success_statuses
+            raise RuntimeError("fatal dispatch")
+
+        requester._http_request = fatal_http_request  # pyright: ignore[reportPrivateUsage]
+        request = _build_request()
+
+        with pytest.raises(RuntimeError, match="fatal dispatch"):
+            await requester._dispatch_requests({request.request_key: request})  # pyright: ignore[reportPrivateUsage]
+
+    asyncio.run(run())
+
+
+def test_session_cache_and_rate_limiter_checks_raise_when_uninitialized() -> None:
+    """Internal dependency guards should fail before context initialization."""
+
+    async def run() -> None:
+        requester = ApiRequester(
+            cache_factory=lambda: _FakeCache(),
+            rate_limiter_factory=lambda: _FakeRateLimiter(),
+        )
+
+        with pytest.raises(RuntimeError, match="HTTP client is not initialized"):
+            await requester._session_check()  # pyright: ignore[reportPrivateUsage]
+        with pytest.raises(RuntimeError, match="Cache is not initialized"):
+            await requester._cache_check()  # pyright: ignore[reportPrivateUsage]
+        with pytest.raises(RuntimeError, match="Rate limiter is not initialized"):
+            await requester._rate_limit_check()  # pyright: ignore[reportPrivateUsage]
+
+    asyncio.run(run())
+
+
+def test_static_request_header_and_paged_json_helpers_cover_edge_cases() -> None:
+    """Static helper methods should merge headers and validate paged payload types."""
+    request = _build_request()
+
+    updated = ApiRequester._updated_request_headers(  # pyright: ignore[reportPrivateUsage]
+        request,
+        Authorization="Bearer token",
+    )
+
+    assert updated.headers["Authorization"] == "Bearer token"
+    assert "Authorization" not in request.headers
+
+    with pytest.raises(ValueError, match="not a JSON list"):
+        ApiRequester._merge_paged_json_lists(  # pyright: ignore[reportPrivateUsage]
+            [1],
+            [{"not": "a list"}],
+        )
+
+
+def test_api_requester_context_manager_initializes_and_cleans_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Context manager should initialize client/cache and cleanly tear them down."""
+
+    class _FakeManagedClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    class _ManagedCache(_FakeCache):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = False
+            self.exited = False
+
+        async def __aenter__(self) -> _ManagedCache:
+            self.entered = True
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            _ = exc_type, exc_value, traceback
+            self.exited = True
+
+    async def run() -> None:
+        fake_client = _FakeManagedClient()
+        cache = _ManagedCache()
+
+        async def fake_config_async_http_client() -> _FakeManagedClient:
+            return fake_client
+
+        monkeypatch.setattr(
+            "api_request.request.api_requester.config_async_http_client",
+            fake_config_async_http_client,
+        )
+
+        requester = ApiRequester(
+            cache_factory=lambda: cache,
+            rate_limiter_factory=lambda: _FakeRateLimiter(),
+        )
+
+        async with requester as active:
+            assert active._client is fake_client  # pyright: ignore[reportPrivateUsage]
+            assert active._cache is cache  # pyright: ignore[reportPrivateUsage]
+            assert cache.entered is True
+
+        assert fake_client.closed is True
+        assert cache.exited is True
+        assert requester._client is None  # pyright: ignore[reportPrivateUsage]
+        assert requester._cache is None  # pyright: ignore[reportPrivateUsage]
+
+    asyncio.run(run())
+
+
+def test_dispatch_requests_uses_cacheable_path_for_cache_key_requests() -> None:
+    """Requests with cache keys should be routed to _cacheable_request."""
+
+    async def run() -> None:
+        requester, _ = _build_requester(responses=[])
+        request = _build_request(cache_key=uuid4())
+        seen_cacheable_calls: list[UUID] = []
+        metadata = ApiRequester._http_response_to_metadata(  # pyright: ignore[reportPrivateUsage]
+            _FakeHttpResponse(
+                status_code=200,
+                reason_phrase="OK",
+                url=request.url,
+                text='{"ok": true}',
+                headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+                content=b'{"ok": true}',
+                elapsed=timedelta(milliseconds=3),
+            )
+        )
+
+        async def fake_cacheable_request(
+            cacheable_request: CachableRequest,
+        ) -> SuccessfulResponseBase | FailedRequestBase:
+            seen_cacheable_calls.append(cacheable_request.cache_key)
+            return SuccessfulResponse(
+                request=cacheable_request.request,
+                metadata=metadata,
+                json={"ok": True},
+                source=Source.NETWORK,
+            )
+
+        requester._cacheable_request = fake_cacheable_request  # pyright: ignore[reportPrivateUsage]
+
+        results = await requester._dispatch_requests({request.request_key: request})  # pyright: ignore[reportPrivateUsage]
+
+        assert seen_cacheable_calls == [request.cache_key]
+        assert isinstance(results[request.request_key], SuccessfulResponse)
+
+    asyncio.run(run())
+
+
+def test_api_requester_aexit_handles_cache_only_state() -> None:
+    """__aexit__ should clean cache without requiring an active client."""
+
+    class _CacheOnly(_FakeCache):
+        def __init__(self) -> None:
+            super().__init__()
+            self.exited = False
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            _ = exc_type, exc_value, traceback
+            self.exited = True
+
+    async def run() -> None:
+        requester = ApiRequester(
+            cache_factory=lambda: _FakeCache(),
+            rate_limiter_factory=lambda: _FakeRateLimiter(),
+        )
+        cache = _CacheOnly()
+        requester._cache = cache  # pyright: ignore[reportPrivateUsage]
+        requester._client = None  # pyright: ignore[reportPrivateUsage]
+
+        await requester.__aexit__(None, None, None)
+
+        assert cache.exited is True
+        assert requester._cache is None  # pyright: ignore[reportPrivateUsage]
+
+    asyncio.run(run())
+
+
+def test_api_requester_aexit_handles_client_only_state() -> None:
+    """__aexit__ should close client even when cache is already absent."""
+
+    class _ClientOnly:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    async def run() -> None:
+        requester = ApiRequester(
+            cache_factory=lambda: _FakeCache(),
+            rate_limiter_factory=lambda: _FakeRateLimiter(),
+        )
+        client = _ClientOnly()
+        requester._cache = None  # pyright: ignore[reportPrivateUsage]
+        requester._client = client  # pyright: ignore[reportPrivateUsage]
+
+        await requester.__aexit__(None, None, None)
+
+        assert client.closed is True
+        assert requester._client is None  # pyright: ignore[reportPrivateUsage]
+
+    asyncio.run(run())
+
+
+def test_cacheable_request_cache_miss_returns_failure_without_cache_write() -> None:
+    """Cache-miss failures should return directly without writing cache."""
+
+    async def run() -> None:
+        cache_key = uuid4()
+        requester, cache = _build_requester(
+            responses=[
+                _FakeHttpResponse(
+                    status_code=404,
+                    reason_phrase="Not Found",
+                    url="https://example.invalid/data",
+                    text='{"error": "missing"}',
+                    headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+                    content=b'{"error": "missing"}',
+                    elapsed=timedelta(milliseconds=6),
+                )
+            ]
+        )
+
+        result = await requester._cacheable_request(  # pyright: ignore[reportPrivateUsage]
+            CachableRequest(
+                request=_build_request(cache_key=cache_key), cache_key=cache_key
+            )
+        )
+
+        assert isinstance(result, FailWithResponse)
+        assert cache.updated == []
 
     asyncio.run(run())

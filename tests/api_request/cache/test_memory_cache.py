@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
+import pytest
 from whenever import Instant
 
 from api_request.cache.memory_cache import InMemoryCache
@@ -121,5 +122,88 @@ def test_in_memory_cache_reports_size_and_full_clear() -> None:
         await cache.flush()
         await cache.clear()
         assert await cache.cache_info() == type(await cache.cache_info())(size=0)
+
+    asyncio.run(run())
+
+
+def test_in_memory_cache_set_requires_cache_validators() -> None:
+    """Setting cache entries without ETag/Last-Modified should fail."""
+
+    async def run() -> None:
+        cache = InMemoryCache()
+        invalid_metadata = ResponseMetadata(
+            status_code=200,
+            reason_phrase="OK",
+            url="https://example.invalid/data",
+            elapsed=10,
+            bytes_downloaded=2,
+            headers=(("Date", "Mon, 06 Jul 2026 18:00:00 GMT"),),
+            received_timestamp=Instant.now().timestamp_nanos(),
+        )
+
+        with pytest.raises(ValueError, match="require etag or last_modified"):
+            await cache.set(uuid4(), "[]", invalid_metadata)
+
+    asyncio.run(run())
+
+
+def test_in_memory_cache_update_304_raises_for_missing_entry() -> None:
+    """304 metadata refresh should fail when the entry is absent."""
+
+    async def run() -> None:
+        cache = InMemoryCache()
+        metadata = _build_metadata()
+
+        with pytest.raises(KeyError, match="No cached response found"):
+            await cache.update_304(uuid4(), metadata)
+
+    asyncio.run(run())
+
+
+def test_in_memory_cache_update_304_merges_metadata_and_preserves_text() -> None:
+    """304 refresh should preserve body text while updating metadata headers."""
+
+    async def run() -> None:
+        cache = InMemoryCache()
+        cache_key = uuid4()
+        original = await cache.set(cache_key, "[]", _build_metadata(etag='"v1"'))
+
+        refreshed_metadata = ResponseMetadata(
+            status_code=304,
+            reason_phrase="Not Modified",
+            url="https://example.invalid/data",
+            elapsed=10,
+            bytes_downloaded=0,
+            headers=(
+                ("Date", "Mon, 06 Jul 2026 18:05:00 GMT"),
+                ("Last-Modified", "Mon, 06 Jul 2026 17:00:00 GMT"),
+                ("ETag", '"v2"'),
+                ("Cache-Control", "max-age=120"),
+            ),
+            received_timestamp=Instant.now().timestamp_nanos(),
+        )
+
+        updated = await cache.update_304(cache_key, refreshed_metadata)
+
+        assert updated.response_text == original.response_text
+        assert updated.etag == '"v2"'
+        assert await cache.get(cache_key) == updated
+
+    asyncio.run(run())
+
+
+def test_in_memory_cache_context_manager_and_factory() -> None:
+    """In-memory cache should support async context and factory creation."""
+
+    async def run() -> None:
+        cache = InMemoryCache()
+        entered = await cache.__aenter__()
+        assert entered is cache
+        await cache.__aexit__(None, None, None)
+
+        from api_request.cache.memory_cache import InMemoryCacheFactory
+
+        created = InMemoryCacheFactory()()
+        assert isinstance(created, InMemoryCache)
 
     asyncio.run(run())

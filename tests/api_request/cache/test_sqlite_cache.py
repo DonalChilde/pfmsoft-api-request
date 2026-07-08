@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from whenever import Instant
 
 from api_request.cache.sqlite_cache.connection_helpers import (
@@ -202,5 +203,58 @@ def test_sqlite_cache_context_manager_respects_connection_ownership(
 
         assert external_connection.execute("SELECT 1").fetchone() is not None
         external_connection.close()
+
+    asyncio.run(run())
+
+
+def test_sqlite_cache_set_requires_validators(tmp_path: Path) -> None:
+    """Set should reject metadata that lacks both etag and last-modified."""
+
+    async def run() -> None:
+        cache = SqliteCache(_build_db_path(tmp_path))
+        invalid_metadata = ResponseMetadata(
+            status_code=200,
+            reason_phrase="OK",
+            url="https://example.invalid/data",
+            elapsed=10,
+            bytes_downloaded=2,
+            headers=(("Date", "Mon, 06 Jul 2026 18:00:00 GMT"),),
+            received_timestamp=Instant.now().timestamp_nanos(),
+        )
+
+        async with cache:
+            with pytest.raises(ValueError, match="require etag or last_modified"):
+                await cache.set(uuid4(), "[]", invalid_metadata)
+
+    asyncio.run(run())
+
+
+def test_sqlite_cache_update_304_raises_for_missing_entry(tmp_path: Path) -> None:
+    """update_304 should raise when cache key does not exist."""
+
+    async def run() -> None:
+        cache = SqliteCache(_build_db_path(tmp_path))
+
+        async with cache:
+            with pytest.raises(KeyError, match="No cached response found"):
+                await cache.update_304(uuid4(), _build_metadata())
+
+    asyncio.run(run())
+
+
+def test_sqlite_cache_clear_all_and_flush_paths(tmp_path: Path) -> None:
+    """Clear without filters should delete all rows and flush should commit."""
+
+    async def run() -> None:
+        cache = SqliteCache(_build_db_path(tmp_path))
+
+        async with cache:
+            await cache.set(uuid4(), "[]", _build_metadata())
+            await cache.flush()
+            assert await cache.cache_info() == type(await cache.cache_info())(size=1)
+
+            await cache.clear()
+            await cache.flush()
+            assert await cache.cache_info() == type(await cache.cache_info())(size=0)
 
     asyncio.run(run())

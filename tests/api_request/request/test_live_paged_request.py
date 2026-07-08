@@ -163,13 +163,13 @@ def test_live_universe_types_cache_data_matches_original_response() -> None:
             ),
         ) as requester:
             start = perf_counter()
-            first = await requester.process_requests({
-                request_one.request_key: request_one
-            })
+            first = await requester.process_requests(
+                {request_one.request_key: request_one}
+            )
             mid = perf_counter()
-            second = await requester.process_requests({
-                request_two.request_key: request_two
-            })
+            second = await requester.process_requests(
+                {request_two.request_key: request_two}
+            )
             end = perf_counter()
             # format the timings to 3 decimal places for logging
             logger.info(

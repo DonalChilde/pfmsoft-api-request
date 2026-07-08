@@ -157,12 +157,12 @@ def test_live_status_request_cache_behavior_reuses_cached_entry() -> None:
                 time_period=1.0,
             ),
         ) as requester:
-            first = await requester.process_requests({
-                request_one.request_key: request_one
-            })
-            second = await requester.process_requests({
-                request_two.request_key: request_two
-            })
+            first = await requester.process_requests(
+                {request_one.request_key: request_one}
+            )
+            second = await requester.process_requests(
+                {request_two.request_key: request_two}
+            )
 
         assert request_one.request_key in first.successful
         assert request_one.request_key not in first.failed
