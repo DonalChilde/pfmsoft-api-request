@@ -16,7 +16,7 @@ def get_auth_manager_settings_from_context(ctx: Context) -> ApiRequestSettings:
             initialized ApiRequestSettings.
 
     Returns:
-        ApiRequestSettings stored under the api-request-settings key.
+        ApiRequestSettings stored under the `api-request-settings` key.
 
     Raises:
         ValueError: If the context does not contain initialized ApiRequestSettings.

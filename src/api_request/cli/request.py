@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from collections.abc import Hashable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
@@ -24,7 +23,8 @@ from .helpers import get_stdin
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    no_args_is_help=True, help="A command-line tool for making API requests."
+    no_args_is_help=True,
+    help="Commands for executing JSON-defined API request batches.",
 )
 
 
@@ -35,7 +35,7 @@ def request(
         Path,
         typer.Option(
             "--from",
-            help="Path to the request file.",
+            help="Input JSON file path. Use '-' (default) to read stdin.",
             allow_dash=True,
             file_okay=True,
             dir_okay=False,
@@ -46,7 +46,7 @@ def request(
         Path,
         typer.Option(
             "--to",
-            help="Path to the output file.",
+            help="Output JSON file path. Use '-' (default) to write stdout.",
             allow_dash=True,
             file_okay=True,
             dir_okay=False,
@@ -57,7 +57,7 @@ def request(
         Path,
         typer.Option(
             "--app-dir",
-            help="Path to the application directory. If not provided, the default application directory will be used.",
+            help=("Application directory override for cache/log/settings paths."),
             file_okay=False,
             dir_okay=True,
             writable=True,
@@ -68,71 +68,95 @@ def request(
         float,
         typer.Option(
             "--max-rate",
-            help="Maximum number of requests per time period for the rate limiter.",
+            help="Rate limiter max acquisitions per time window.",
         ),
     ] = 50.0,
     time_period: Annotated[
         float,
         typer.Option(
             "--time-period",
-            help="Time period in seconds for the rate limiter.",
+            help="Rate limiter window length in seconds.",
         ),
     ] = 60.0,
+    forced_fail_status_codes: Annotated[
+        list[int] | None,
+        typer.Option(
+            "--code",
+            help="HTTP status codes that should be treated as batch request failures.",
+        ),
+    ] = None,
     plain: Annotated[
         bool,
         typer.Option(
             "--plain",
-            help="Display the output in plain text markdown instead of Rich markdown.",
+            help="Write plain JSON to stdout instead of Rich formatted output.",
         ),
     ] = False,
     overwrite: Annotated[
         bool,
         typer.Option(
             "--overwrite",
-            help="Whether to overwrite the output file if it already exists.",
+            help="Overwrite existing output file when --to is a file path.",
         ),
     ] = False,
     indent: Annotated[
         int | None,
         typer.Option(
             "--indent",
-            help="Number of spaces to use for indentation in the output JSON.",
+            help="Indent width for output JSON (compact when omitted).",
         ),
     ] = None,
     quiet: Annotated[
         bool,
         typer.Option(
             "--quiet",
-            help="Suppress output messages.",
+            help="Suppress non-essential CLI messages.",
         ),
     ] = False,
     version: Annotated[
         bool,
         typer.Option(
             "--version",
-            help="Show the version of the api-request CLI.",
+            help="Show CLI version and resolved runtime directories.",
             is_eager=True,
         ),
     ] = False,
 ):
-    """Make an API request.
+    """Execute a batch of API requests from JSON input.
 
-    Requests use UUIDs as keys to identify requests and responses.
+    Input format:
+        A JSON object keyed by request UUID. Each value must match the
+        `Request` model shape.
 
-    If you need to generate a UUID for a request, you can use the `uuidgen` command-line
-    tool or any other UUID generator.
+    Output format:
+        A JSON object matching the `Responses` model with `successful` and
+        `failed` maps keyed by the same request UUIDs.
 
-    Using `uuidgen`:
-    ```bash
-    uuidgen
-    ```
+    Notes:
+        - `--from -` reads input JSON from stdin.
+        - `--to -` writes output to stdout.
+        - Use `--plain` for plain stdout JSON when writing to stdout.
+        - Use `--code` to treat specific HTTP status codes as batch request failures.
+          Any requests that have not made it to the network yet will fail if any of the
+          specified codes are present in a response.
 
-    Using python:
-    ```bash
-    python -c "import uuid; print(uuid.uuid4())"
-    or
-    python3 -c "import uuid; print(uuid.uuid4())"
-    ```
+    UUID generation quick reference:
+        Request maps are keyed by UUID strings. Generate UUID values with one
+        of the commands below.
+
+        Shell:
+            ```bash
+            uuidgen
+            ```
+
+        Python:
+            ```bash
+            python -c "import uuid; print(uuid.uuid4())"
+            ```
+
+            ```bash
+            python3 -c "import uuid; print(uuid.uuid4())"
+            ```
     """
     if quiet:
         messenger = Console(stderr=True, quiet=True)
@@ -159,21 +183,27 @@ def request(
             "[bold red]Error: No requests found in the input file.[/bold red]"
         )
         raise typer.Exit(code=1)
+    force_codes: set[int] = (
+        set(forced_fail_status_codes) if forced_fail_status_codes else set()
+    )
 
-    async def run_requests[T: Hashable](requests_to_run: Requests[T]) -> Responses[T]:
+    async def run_requests(
+        requests_to_run: Requests, force_fail_codes: set[int]
+    ) -> Responses:
         cache_factory = SqliteCacheFactory(settings.cache_file)
-        rate_limiter_factory = AiolimiterRateLimiterFactory[T](
+        rate_limiter_factory = AiolimiterRateLimiterFactory(
             max_rate=max_rate, time_period=time_period
         )
 
         async with ApiRequester(
             cache_factory=cache_factory,
             rate_limiter_factory=rate_limiter_factory,
+            force_fail_on=force_fail_codes,
         ) as requester:
             responses = await requester.process_requests(requests_to_run)
             return responses
 
-    responses = asyncio.run(run_requests(requests))
+    responses = asyncio.run(run_requests(requests, force_codes))
     if file_out == Path("-"):
         if plain:
             print(ResponsesRoot(root=responses).model_dump_json(indent=indent))

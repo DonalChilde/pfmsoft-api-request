@@ -1,4 +1,9 @@
-"""Main entry point for the api-request CLI."""
+"""Main entry point for the api-request CLI.
+
+NOTE: This is not currently the entry point, as so far there is only one command.
+If additional commands are added, this module will be the entry point and will
+dispatch to subcommands.
+"""
 
 from dataclasses import asdict
 
@@ -28,8 +33,8 @@ def default_options(ctx: typer.Context) -> None:
             for downstream subcommands.
 
     Notes:
-        The resolved EveAuthManagerSettings object is stored in ctx.obj under
-        the eve-auth-manager-settings key.
+        The resolved ApiRequestSettings object is stored in ctx.obj under the
+        `api-request-settings` key.
     """
     settings = get_settings()
     setup_logging(log_dir=settings.logging_directory)
