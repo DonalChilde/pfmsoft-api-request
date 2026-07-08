@@ -41,6 +41,8 @@ class ApiRequesterProtocol(Protocol):
         - Input keys in `requests` are preserved in output mappings.
         - Successful request outcomes are returned in `Responses.successful`.
         - Request-scoped failures are returned in `Responses.failed`.
+        - Implementations are typically used as async context managers to
+            provision HTTP/cache/rate-limit dependencies.
         - Implementations may raise for fatal infrastructure/configuration errors.
     """
 

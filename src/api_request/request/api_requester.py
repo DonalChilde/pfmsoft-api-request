@@ -19,12 +19,13 @@ Operational contracts:
 
 3. Failure policy:
         - Mixed failure mode is used.
-        - Recoverable or expected request failures are returned as `FailedResponse`.
-        - Fatal infrastructure/configuration failures raise and abort batch processing.
-        - Initial recoverable HTTP status seeds include 400, 404, and 429.
-        - Initial unrecoverable HTTP status seeds include 401, 403, 500, 502,
-            503, and 504.
-        - Status and exception classification are centralized in helper methods.
+        - Non-success HTTP responses are returned as request-scoped
+            `FailedResponse` values by default.
+        - Fatal infrastructure/configuration failures raise and abort batch
+            processing.
+        - Optional `force_fail_on` status codes trigger a shared fail flag that
+            causes subsequent/in-flight requests to short-circuit as
+            request-level failures.
 
 4. HTTP status handling:
         - Success classification is implemented with `match` for easy policy changes.
@@ -117,10 +118,10 @@ logger.addHandler(logging.NullHandler())
 
 
 class ForcedFailureError(Exception):
-    """Error raised during forced failure of request processing.
+    """Internal control-flow error used by forced-failure signaling.
 
-    This error can be raised during a primary failure, with the response metadata and JSON,
-    or it can be raised from a flag check as a signal to abort the entire batch of requests.
+    This exception communicates that request processing should short-circuit
+    because a force-fail status condition was reached.
     """
 
     def __init__(
@@ -130,7 +131,7 @@ class ForcedFailureError(Exception):
         response_metadata: ResponseMetadata | None = None,
         from_flag: bool = False,
     ) -> None:
-        """Initialize the ForcedFailureError with request and optional response details."""
+        """Initialize forced-failure error state with request context."""
         self.request = request
         self.response_json = response_json
         self.response_metadata = response_metadata
@@ -172,7 +173,16 @@ class ApiRequester(ApiRequesterProtocol):
         rate_limiter_factory: RateLimiterFactoryProtocol,
         force_fail_on: set[int] | None = None,
     ) -> None:
-        """Initialize the ApiRequester with a cache factory."""
+        """Initialize requester dependencies and optional forced-failure policy.
+
+        Args:
+            cache_factory: Callable that builds one cache instance per requester
+                context.
+            rate_limiter_factory: Callable that builds one rate-limiter instance
+                per requester context.
+            force_fail_on: Optional set of HTTP status codes that trigger the
+                shared forced-failure flag.
+        """
         self._client: AsyncClient | None = None
         self._cache: CacheProtocol | None = None
         self._rate_limit: RateLimiterProtocol | None = None
@@ -183,28 +193,14 @@ class ApiRequester(ApiRequesterProtocol):
         self._force_failure: bool = False
 
     def _check_force_failure_flag(self, request: Request) -> None:
-        """Check if the request processing should be forcefully failed.
-
-        Should be called right before and after rate limit gate to catch both states.
-
-        Should be called with request? to enable good logging info on state?
-
-        Checks to see if the self_force_failure flag is set, and if so, raises a
-        ForcedFailureError. This is used to receive the signal to abort the entire batch
-        of requests due to a failure in another request.
-        """
+        """Raise forced-failure control-flow error when shared flag is set."""
         if self._force_failure:
             raise ForcedFailureError(request=request, from_flag=True)
 
     def _check_response_for_force_failure(
         self, request: Request, response_json: Any, response_metadata: ResponseMetadata
     ) -> None:
-        """Check if the response should trigger a forced failure for the entire batch.
-
-        If the response is a FailWithResponse and its status code is in the
-        self._force_fail_on set, then set the self._force_failure flag to True and raise
-        a ForcedFailureError. This will signal to abort the entire batch of requests.
-        """
+        """Activate forced-failure signaling when configured status is observed."""
         if response_metadata.status_code in self._force_fail_on:
             self._force_failure = True
             raise ForcedFailureError(
@@ -304,7 +300,7 @@ class ApiRequester(ApiRequesterProtocol):
         return merged
 
     async def __aenter__(self) -> Self:
-        """Enter the asynchronous context manager."""
+        """Enter context and initialize HTTP client, cache, and rate limiter."""
         self._client = await config_async_http_client()
         self._cache = self._cache_factory()
         await self._cache.__aenter__()
@@ -317,7 +313,7 @@ class ApiRequester(ApiRequesterProtocol):
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Exit the asynchronous context manager."""
+        """Exit context and release managed resources."""
         if self._cache is not None:
             await self._cache.__aexit__(exc_type, exc_value, traceback)
             self._cache = None
@@ -368,7 +364,11 @@ class ApiRequester(ApiRequesterProtocol):
         self,
         requests: Requests,
     ) -> Responses:
-        """Process a batch of API requests and return their corresponding cached responses."""
+        """Process a request batch and normalize outcomes into public models.
+
+        The input mapping keys are preserved across output `successful` and
+        `failed` maps.
+        """
         self._force_failure = False
         intermediate_responses = await self._dispatch_requests(requests)
 
@@ -408,7 +408,7 @@ class ApiRequester(ApiRequesterProtocol):
         self,
         requests: Requests,
     ) -> dict[UUID, IntermediateResponseBase]:
-        """Dispatch a batch of API requests and return their corresponding intermediate responses."""
+        """Dispatch batch requests concurrently and collect intermediate results."""
 
         async def execute(request: Request) -> IntermediateResponseBase:
             try:
@@ -434,7 +434,15 @@ class ApiRequester(ApiRequesterProtocol):
         allow_pagination: bool = True,
         expected_success_statuses: set[int] | None = None,
     ) -> SuccessfulResponseBase | FailedRequestBase:
-        """Perform an HTTP request and return the corresponding intermediate response."""
+        """Perform one network request and classify the intermediate outcome.
+
+        Args:
+            request: Request wrapper to execute.
+            allow_pagination: Whether page fan-out is allowed for successful
+                page-eligible responses.
+            expected_success_statuses: Optional explicit success status override
+                set (for example `{304}` during stale-cache revalidation).
+        """
         session = await self.session
         rate_limiter = await self.rate_limiter
         outgoing_headers = request.request.headers
@@ -507,7 +515,14 @@ class ApiRequester(ApiRequesterProtocol):
     async def _cacheable_request(
         self, request: CachableRequest
     ) -> SuccessfulResponseBase | FailedRequestBase:
-        """Perform a cacheable HTTP request and return the corresponding intermediate response."""
+        """Perform one cache-aware request flow.
+
+        Behavior:
+            - Missing cache entry: execute network request and cache success.
+            - Fresh cache entry: return cached body/metadata.
+            - Stale cache entry: revalidate with conditional headers and update
+              cache on `304` or `200` outcomes.
+        """
         cache = await self.cache
         cached_response = await cache.get(request.cache_key)
 
@@ -576,13 +591,17 @@ class ApiRequester(ApiRequesterProtocol):
                 )
 
     def _is_paged_response(self, response: SuccessfulResponse) -> bool:
-        """Determine if the response is a paged response."""
+        """Return True when response is a successful multi-page payload."""
         return response.metadata.status_code == 200 and response.metadata.pages > 1
 
     async def _handle_paged_response(
         self, response: SuccessfulResponse
     ) -> SuccessfulResponseBase | FailedRequestBase:
-        """Handle a paged response and return consolidated response."""
+        """Collect additional pages and return a merged successful response.
+
+        If any page fetch fails, or source consistency checks fail, a
+        request-scoped failure is returned.
+        """
         total_pages = response.metadata.pages
         if total_pages <= 1:
             return response
@@ -629,7 +648,7 @@ class ApiRequester(ApiRequesterProtocol):
     async def _gather_paged_responses(
         self, response: SuccessfulResponse
     ) -> list[SuccessfulResponseBase | FailedRequestBase]:
-        """Fetch all additional pages for a paged response concurrently."""
+        """Fetch page 2..N responses concurrently for a paged first response."""
         tasks = (
             self._http_request(
                 self._build_paged_request(response, page_number),
@@ -644,7 +663,7 @@ class ApiRequester(ApiRequesterProtocol):
         response: SuccessfulResponse,
         page_number: int,
     ) -> UnprocessedRequest:
-        """Build a request for one additional paged response."""
+        """Build one follow-up paged request by injecting `page` parameter."""
         return UnprocessedRequest(
             request=replace(
                 response.request,
@@ -660,11 +679,7 @@ class ApiRequester(ApiRequesterProtocol):
         first_response: SuccessfulResponseBase,
         paged_responses: list[SuccessfulResponseBase],
     ) -> bool:
-        """Check if the data on the server has changed between the first and subsequent paged responses."""
-        # If the last-modified header for the first response does not match the last-modified header
-        # for any of the subsequent paged responses, return True indicating that the data has changed.
-        # Otherwise, return False.
-
+        """Check for paged-source drift using `Last-Modified` consistency."""
         first_last_modified = first_response.metadata.last_modified
         for response in paged_responses:
             if response.metadata.last_modified != first_last_modified:

@@ -1,4 +1,8 @@
-"""Models for API requests."""
+"""Public request/response models used by API orchestration.
+
+This module defines immutable dataclasses for request and response objects,
+plus convenience properties for common HTTP metadata lookups.
+"""
 
 import logging
 from dataclasses import dataclass, field
@@ -12,6 +16,7 @@ from whenever import Instant
 logger = logging.getLogger(__name__)
 
 type PARAMETER = str | int | float
+"""Supported query-parameter value types."""
 
 
 #######################################################################################
@@ -21,7 +26,10 @@ type PARAMETER = str | int | float
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class Request:
-    """Represents an API request."""
+    """Represents one outbound HTTP request definition.
+
+    The model is immutable and can be safely shared across async tasks.
+    """
 
     request_key: UUID = field(default_factory=uuid4)
     """The UUID key for the request."""
@@ -59,15 +67,27 @@ class Source(StrEnum):
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class X_ratelimit:
+    """Parsed X-RateLimit header values."""
+
     group: str
+    """X-RateLimit group identifier."""
     limit: str
+    """Configured request budget for the current window."""
     remaining: str
+    """Remaining budget in the current window."""
     used: str
+    """Consumed budget in the current window."""
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class ResponseMetadata:
-    """Represents the metadata of an ESI response, including status code, headers, etc."""
+    """Represents transport metadata for a single HTTP response.
+
+    Time unit conventions:
+        - `elapsed` is stored in microseconds.
+        - `received_timestamp` is stored in Unix nanoseconds.
+        - `expires_at` (derived) is stored in Unix seconds.
+    """
 
     status_code: int
     """The HTTP status code of the response."""
@@ -91,7 +111,11 @@ class ResponseMetadata:
     """A lower case version of the headers for easier access to common headers like ETag and Last-Modified."""
 
     def __post_init__(self):
-        """Create a lower case version of the headers for easier access to common headers like ETag and Last-Modified."""
+        """Build a lowercase header lookup map for convenience accessors.
+
+        If duplicate header names differ only by case, the later value wins
+        in the lowercase map and a warning is logged.
+        """
         self._headers_lower.update({k.lower(): v for k, v in self.headers})
         if len(self.headers) != len(self._headers_lower):
             logger.warning(
@@ -104,17 +128,21 @@ class ResponseMetadata:
 
     @property
     def as_string(self) -> str:
-        """Get the response metadata as a JSON string."""
+        """Serialize metadata as JSON for cache persistence."""
         return ResponseMetadataRoot(self).model_dump_json()
 
     @property
     def headers_lower(self) -> dict[str, str]:
-        """Get the lower case version of the headers for easier access to common headers like ETag and Last-Modified."""
+        """Return lowercase header mapping used by convenience properties."""
         return self._headers_lower
 
     @property
     def received_at(self) -> Instant:
-        """Convert the received_timestamp to an Instant, if possible."""
+        """Convert `received_timestamp` to an Instant.
+
+        Raises:
+            ValueError: If `received_timestamp` is unset (`-1`).
+        """
         if self.received_timestamp != -1:
             return Instant.from_timestamp_nanos(self.received_timestamp)
         raise ValueError("Received timestamp is not set.")
@@ -171,7 +199,13 @@ class ResponseMetadata:
 
     @property
     def expires_at(self) -> int | None:
-        """Calculate the expiration time of the response based on the Expires header or Cache-Control max-age."""
+        """Return cache expiration instant derived from response headers.
+
+        Precedence:
+            1. `Cache-Control: max-age` with a valid `Date` header.
+            2. `Expires` header.
+            3. `None` when neither can be parsed.
+        """
         if self.max_age is not None and self.date is not None:
             try:
                 response_date = Instant.parse_rfc2822(self.date)
@@ -203,7 +237,7 @@ class ResponseMetadata:
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class Response:
-    """Represents an ESI response."""
+    """Represents one successful API response returned to callers."""
 
     metadata: ResponseMetadata
     """The metadata of the response, including status code, headers, etc."""
@@ -215,14 +249,18 @@ class Response:
     """The source of the response, for example cache or network."""
 
     def to_string(self, indent: int) -> str:
-        """Return a string representation of the Response with the specified indentation."""
+        """Serialize this response as JSON text.
+
+        Args:
+            indent: Indentation level passed to pydantic JSON serializer.
+        """
         root_model = RootModel[Response](cast(Response, self))
         json_str = root_model.model_dump_json(indent=indent)
         return json_str
 
     @classmethod
     def from_string(cls, json_str: str) -> Response:
-        """Parse the Response from a JSON string."""
+        """Deserialize a Response from JSON text."""
         value = RootModel[Response].model_validate_json(json_str).root
         return value
 
@@ -244,6 +282,8 @@ class FailedResponse:
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class Responses:
+    """Container for batched request outcomes."""
+
     successful: dict[UUID, Response] = field(default_factory=dict[UUID, Response])
     """A dictionary of successful responses, keyed by request UUID."""
     failed: dict[UUID, FailedResponse] = field(
@@ -251,8 +291,24 @@ class Responses:
     )
     """A dictionary of failed responses, keyed by request UUID."""
 
+    def to_string(self, indent: int) -> str:
+        """Serialize this Responses container as JSON text.
+
+        Args:
+            indent: Indentation level passed to pydantic JSON serializer.
+        """
+        json_str = ResponsesRoot(root=self).model_dump_json(indent=indent)
+        return json_str
+
+    @classmethod
+    def from_string(cls, json_str: str) -> Responses:
+        """Deserialize a Responses container from JSON text."""
+        value = ResponsesRoot.model_validate_json(json_str).root
+        return value
+
 
 type Requests = dict[UUID, Request]
+"""Batch request mapping keyed by request UUID."""
 
 #######################################################################################
 # Root Models

@@ -92,7 +92,15 @@ class RequestFromStaleCache(CachableRequest):
 
     @property
     def conditional_headers(self) -> dict[str, str]:
-        """Return the conditional headers used to revalidate a stale cache entry."""
+        """Build conditional request headers for stale-cache revalidation.
+
+        Returns:
+            A dictionary containing `If-None-Match` and/or
+            `If-Modified-Since`.
+
+        Raises:
+            ValueError: If both validators are missing.
+        """
         headers: dict[str, str] = {}
         if not self.etag and not self.last_modified:
             raise ValueError(
