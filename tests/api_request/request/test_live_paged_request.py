@@ -117,7 +117,7 @@ def test_live_universe_types_response_is_json_array_of_ints() -> None:
     """The live universe types payload should be a non-empty int array."""
     response = asyncio.run(_fetch_live_universe_types_response(reuse_shared=True))
 
-    payload: list[int] = response.json_loads
+    payload: list[int] = response.json
     assert isinstance(payload, list)
     assert len(payload) > 0
     assert all(isinstance(item, int) for item in payload)
@@ -201,8 +201,8 @@ def test_live_universe_types_cache_data_matches_original_response() -> None:
 
         # Primary check for this live-paged test: cache data equals original data.
         assert second_response.json == first_response.json
-        first_payload = first_response.json_loads
-        second_payload = second_response.json_loads
+        first_payload = first_response.json
+        second_payload = second_response.json
         assert first_payload == second_payload
 
         cache_info = await cache.cache_info()

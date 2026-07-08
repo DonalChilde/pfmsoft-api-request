@@ -227,15 +227,6 @@ class Response[T: Hashable]:
         value = RootModel[Response[Hashable]].model_validate_json(json_str).root
         return cast(Response[T], value)
 
-    @property
-    def json_loads(self) -> Any:
-        """Get the parsed JSON body.
-
-        Returns:
-            The parsed JSON object.
-        """
-        return self.json
-
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class FailedResponse[T: Hashable]:

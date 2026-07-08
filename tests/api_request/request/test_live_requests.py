@@ -111,7 +111,7 @@ def test_live_status_request_response_has_expected_keys() -> None:
     """The live ESI status payload should contain stable top-level keys."""
     response = asyncio.run(_fetch_live_status_response(reuse_shared=True))
 
-    payload: dict[str, Any] = response.json_loads
+    payload: dict[str, Any] = response.json
     assert isinstance(payload, dict)
     assert "players" in payload
     assert "server_version" in payload
