@@ -130,6 +130,7 @@ class ForcedFailureError(Exception):
         response_metadata: ResponseMetadata | None = None,
         from_flag: bool = False,
     ) -> None:
+        """Initialize the ForcedFailureError with request and optional response details."""
         self.request = request
         self.response_json = response_json
         self.response_metadata = response_metadata
@@ -225,42 +226,6 @@ class ApiRequester(ApiRequesterProtocol):
             case _:
                 return False
 
-    # @classmethod
-    # def _is_recoverable_status(cls, status_code: int) -> bool:
-    #     """Return True when a status code should map to `FailedResponse`.
-
-    #     The initial policy is explicit (`400`, `404`, `429`) and can be expanded
-    #     by adding values to `_RECOVERABLE_HTTP_STATUSES`.
-    #     """
-    #     match status_code:
-    #         case code if code in cls._RECOVERABLE_HTTP_STATUSES:
-    #             return True
-    #         case _:
-    #             return False
-
-    # @classmethod
-    # def _is_unrecoverable_status(cls, status_code: int) -> bool:
-    #     """Return True when a status code is a known unrecoverable failure.
-
-    #     The initial policy is explicit (`401`, `403`, `500`, `502`, `503`,
-    #     `504`) and can be expanded by adding values to
-    #     `_UNRECOVERABLE_HTTP_STATUSES`.
-    #     """
-    #     match status_code:
-    #         case code if code in cls._UNRECOVERABLE_HTTP_STATUSES:
-    #             return True
-    #         case _:
-    #             return False
-
-    # @classmethod
-    # def _is_known_failure_status(cls, status_code: int) -> bool:
-    #     """Return True when a status code is in the explicit failure policy."""
-    #     match status_code:
-    #         case code if cls._is_recoverable_status(code):
-    #             return True
-    #         case code if cls._is_unrecoverable_status(code):
-    #             return True
-    #         case _:
     #             return False
 
     def _is_fatal_exception(self, exc: Exception) -> bool:

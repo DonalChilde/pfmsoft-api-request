@@ -4,8 +4,8 @@ This module defines the protocol shape used to gate outbound request work.
 Concrete implementations live in sibling modules.
 
 Protocol contract:
-        - Each `limit(subject)` call returns an async context manager used to gate one
-            operation.
+        - Each `limit(subject)` call returns an async context manager used to gate
+            one operation.
         - Implementations may choose how `subject` influences behavior.
 
 The default concrete implementation in this package currently uses one shared
@@ -80,6 +80,10 @@ class RateLimiterProtocol(Protocol):
 
         Returns:
             An async context manager that acquires limiter capacity.
+
+        Notes:
+            The contract does not require distinct limiter instances per call.
+            Returning a shared context manager object is valid.
         """
         ...
 
@@ -93,5 +97,5 @@ class RateLimiterFactoryProtocol(Protocol):
     """
 
     def __call__(self) -> RateLimiterProtocol:
-        """Build and return a configured shared rate-limiter instance."""
+        """Build and return a configured rate-limiter instance."""
         ...

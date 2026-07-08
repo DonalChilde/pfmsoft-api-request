@@ -1,4 +1,8 @@
-"""Rate limiter implementation using aiolimiter."""
+"""Rate limiter implementation using aiolimiter.
+
+This module provides a protocol-compatible wrapper around one shared
+`aiolimiter.AsyncLimiter` and a small factory for requester construction.
+"""
 
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -47,6 +51,16 @@ class AiolimiterRateLimiterFactory(RateLimiterFactoryProtocol):
 
     This factory is designed to be passed into requester constructors that build
     their shared limiter in `__aenter__`.
+
+    Example:
+        ```python
+        from api_request.rate_limit import AiolimiterRateLimiterFactory
+
+        factory = AiolimiterRateLimiterFactory(max_rate=100.0, time_period=60.0)
+        limiter = factory()
+        async with limiter.limit("esi-status"):
+            ...
+        ```
     """
 
     max_rate: float
