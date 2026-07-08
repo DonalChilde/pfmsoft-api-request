@@ -27,7 +27,7 @@ see [pyproject,toml](pyproject.toml)
 - Lint: `uv run ruff check`
 - Format check .py files: `uv run ruff format --check`
 - Format .py files: `uv run ruff format`
-- run app cli: `uv run eve-auth`
+- run app cli: `uv run api-request`
 
 NOTE: run Format command on python files before linting. This will fix many of the lint errors automatically.
 

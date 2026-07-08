@@ -5,6 +5,7 @@ If additional commands are added, this module will be the entry point and will
 dispatch to subcommands.
 """
 
+import logging
 from dataclasses import asdict
 
 import typer
@@ -14,13 +15,6 @@ from api_request.logging_config import setup_logging
 from api_request.settings import get_settings
 
 from .request import app as request_app
-
-app = typer.Typer(
-    name="api-request",
-    help="A command-line tool for managing API requests.",
-    no_args_is_help=True,
-)
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -43,5 +37,12 @@ def default_options(ctx: typer.Context) -> None:
         f"Starting {__app_name__} v{__version__} with settings: {asdict(settings)!r}"
     )
 
+
+app = typer.Typer(
+    name="api-request",
+    help="A command-line tool for managing API requests.",
+    callback=default_options,
+    no_args_is_help=True,
+)
 
 app.add_typer(request_app)

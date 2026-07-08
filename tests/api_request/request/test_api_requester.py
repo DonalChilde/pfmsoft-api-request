@@ -140,7 +140,7 @@ class _FakeRateLimiter:
         yield
 
 
-def _build_request(*, cache_key: UUID | None = None) -> Request[str]:
+def _build_request(*, cache_key: UUID | None = None) -> Request:
     return Request(
         request_key=uuid4(),
         url="https://example.invalid/data",
@@ -778,7 +778,7 @@ def test_process_requests_maps_intermediate_results() -> None:
             )
         )
 
-        async def fake_dispatch(_: dict[UUID, Request[str]]):
+        async def fake_dispatch(_: dict[UUID, Request]):
             return {
                 request_key: Response304FromStaleCache(
                     request=request,

@@ -152,21 +152,6 @@ class ForcedFailureError(Exception):
 class ApiRequester(ApiRequesterProtocol):
     """Orchestrates cache-aware and rate-limited API request execution."""
 
-    _RECOVERABLE_HTTP_STATUSES = frozenset({400, 404, 429})
-    """Recoverable HTTP status seeds for request-level failures.
-
-    Keep this intentionally small and explicit at first, then extend based on
-    endpoint behavior and test coverage.
-    """
-
-    _UNRECOVERABLE_HTTP_STATUSES = frozenset({401, 403, 500, 502, 503, 504})
-    """Unrecoverable HTTP status seeds for request-level failures.
-
-    These statuses are considered non-retryable by the current request flow.
-    They still map to request-scoped failures rather than process-wide fatal
-    exceptions.
-    """
-
     def __init__(
         self,
         cache_factory: CacheFactory,
@@ -222,8 +207,6 @@ class ApiRequester(ApiRequesterProtocol):
             case _:
                 return False
 
-    #             return False
-
     def _is_fatal_exception(self, exc: Exception) -> bool:
         """Return True when an exception should fail-fast the whole batch.
 
@@ -269,24 +252,6 @@ class ApiRequester(ApiRequesterProtocol):
         merged_headers = dict(request.headers)
         merged_headers.update(headers)
         return replace(request, headers=merged_headers)
-
-    @staticmethod
-    def _as_cached_response(
-        *,
-        cache_key: UUID,
-        json: Any,
-        metadata: ResponseMetadata,
-        etag: str | None = None,
-    ) -> CachedResponse:
-        """Build a cache model from response primitives."""
-        return CachedResponse(
-            cache_key=cache_key,
-            response_text=json_io.json_dumps(json),
-            response_metadata_json=metadata.as_string,
-            etag=etag if etag is not None else metadata.etag,
-            expires_at=metadata.expires_at,
-            cache_timestamp=Instant.now().timestamp_nanos(),
-        )
 
     @staticmethod
     def _merge_paged_json_lists(first_json: Any, other_jsons: list[Any]) -> list[Any]:

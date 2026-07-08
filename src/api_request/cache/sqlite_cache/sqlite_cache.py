@@ -44,6 +44,8 @@ class SqliteCache(CacheProtocol):
             When initialized with an existing connection, that connection is never
             closed by this class.
         """
+        self._connection: sqlite3.Connection | None = None
+        self._close_connection_on_exit: bool = False
         if isinstance(db, sqlite3.Connection):
             self._connection = db
             self._close_connection_on_exit = False
