@@ -277,7 +277,7 @@ def test_request_cli_respects_app_dir_and_rich_stdout(
         file_in=Path("-"),
         file_out=Path("-"),
         plain=False,
-        application_directory=tmp_path,
+        app_dir=tmp_path,
     )
 
     assert settings.application_directory == tmp_path

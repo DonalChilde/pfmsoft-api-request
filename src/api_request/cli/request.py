@@ -53,11 +53,11 @@ def request(
             writable=True,
         ),
     ] = Path("-"),
-    application_directory: Annotated[
-        Path,
+    app_dir: Annotated[
+        Path | None,
         typer.Option(
             "--app-dir",
-            help=("Application directory override for cache/log/settings paths."),
+            help="Application directory override for cache/log/settings paths.",
             file_okay=False,
             dir_okay=True,
             writable=True,
@@ -163,8 +163,8 @@ def request(
     else:
         messenger = Console(stderr=True)
     settings = get_settings()
-    if application_directory:
-        settings.application_directory = application_directory
+    if app_dir:
+        settings.application_directory = app_dir
     setup_logging(log_dir=settings.logging_directory)
     logger.info(
         f"Starting {__app_name__} v{__version__} with settings: {asdict(settings)!r}"
