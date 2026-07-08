@@ -102,9 +102,11 @@ from api_request.request.intermediate_models import (
 from api_request.request.models import (
     FailedResponse,
     Request,
+    Requests,
     Response,
     ResponseMetadata,
     ResponseMetadataRoot,
+    Responses,
     Source,
 )
 from api_request.request.protocols import (
@@ -335,23 +337,24 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     async def process_requests(
         self,
-        requests: dict[UUID, Request[T]],
-    ) -> dict[UUID, Response[T] | FailedResponse[T]]:
+        requests: Requests[T],
+    ) -> Responses[T]:
         """Process a batch of API requests and return their corresponding cached responses."""
         intermediate_responses = await self._dispatch_requests(requests)
 
-        responses: dict[UUID, Response[T] | FailedResponse[T]] = {}
+        successful: dict[UUID, Response[T]] = {}
+        failed: dict[UUID, FailedResponse[T]] = {}
         for request_id, intermediate in intermediate_responses.items():
             match intermediate:
                 case SuccessfulResponseBase():
-                    responses[request_id] = Response(
+                    successful[request_id] = Response(
                         metadata=intermediate.metadata,
                         text=intermediate.text,
                         request=intermediate.request,
                         source=intermediate.source,
                     )
                 case FailWithResponse():
-                    responses[request_id] = FailedResponse(
+                    failed[request_id] = FailedResponse(
                         metadata=intermediate.metadata,
                         text=intermediate.text,
                         request=intermediate.request,
@@ -360,20 +363,20 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                         ],
                     )
                 case FailNoResponse():
-                    responses[request_id] = FailedResponse(
+                    failed[request_id] = FailedResponse(
                         request=intermediate.request,
                         error_messages=[intermediate.error_message],
                     )
                 case _:
-                    responses[request_id] = FailedResponse(
+                    failed[request_id] = FailedResponse(
                         request=requests[request_id],
                         error_messages=["Unknown intermediate response type"],
                     )
-        return responses
+        return Responses(successful=successful, failed=failed)
 
     async def _dispatch_requests(
         self,
-        requests: dict[UUID, Request[T]],
+        requests: Requests[T],
     ) -> dict[UUID, IntermediateResponseBase[T]]:
         """Dispatch a batch of API requests and return their corresponding intermediate responses."""
 

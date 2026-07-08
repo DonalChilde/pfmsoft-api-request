@@ -83,7 +83,9 @@ async def _fetch_live_universe_types_response(
             end - start,
         )
 
-    response = responses[request_id]
+    assert request_id in responses.successful
+    assert request_id not in responses.failed
+    response = responses.successful[request_id]
     assert isinstance(response, Response)
     logger.info(
         "Fetched universe types response: status=%s source=%s bytes=%s",
@@ -179,8 +181,13 @@ def test_live_universe_types_cache_data_matches_original_response() -> None:
                 end - start,
             )
 
-        first_response = first[request_one.request_key]
-        second_response = second[request_two.request_key]
+        assert request_one.request_key in first.successful
+        assert request_one.request_key not in first.failed
+        assert request_two.request_key in second.successful
+        assert request_two.request_key not in second.failed
+
+        first_response = first.successful[request_one.request_key]
+        second_response = second.successful[request_two.request_key]
         assert isinstance(first_response, Response)
         assert isinstance(second_response, Response)
         assert first_response.metadata.status_code == 200

@@ -77,7 +77,9 @@ async def _fetch_live_status_response(*, reuse_shared: bool = True) -> Response[
     ) as requester:
         responses = await requester.process_requests({request_id: request})
 
-    response = responses[request_id]
+    assert request_id in responses.successful
+    assert request_id not in responses.failed
+    response = responses.successful[request_id]
     assert isinstance(response, Response)
     logger.info(
         "Fetched live status response: status=%s source=%s bytes=%s",
@@ -162,8 +164,13 @@ def test_live_status_request_cache_behavior_reuses_cached_entry() -> None:
                 request_two.request_key: request_two
             })
 
-        first_response = first[request_one.request_key]
-        second_response = second[request_two.request_key]
+        assert request_one.request_key in first.successful
+        assert request_one.request_key not in first.failed
+        assert request_two.request_key in second.successful
+        assert request_two.request_key not in second.failed
+
+        first_response = first.successful[request_one.request_key]
+        second_response = second.successful[request_two.request_key]
         assert isinstance(first_response, Response)
         assert isinstance(second_response, Response)
         assert first_response.metadata.status_code == 200

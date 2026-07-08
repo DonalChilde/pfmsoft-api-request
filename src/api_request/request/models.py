@@ -253,8 +253,22 @@ class FailedResponse[T: Hashable]:
     """An optional list of error messages describing the failure."""
 
 
+@dataclass(slots=True, kw_only=True, frozen=True)
+class Responses[T: Hashable]:
+    successful: dict[UUID, Response[T]] = field(default_factory=dict[UUID, Response[T]])
+    """A dictionary of successful responses, keyed by request UUID."""
+    failed: dict[UUID, FailedResponse[T]] = field(
+        default_factory=dict[UUID, FailedResponse[T]]
+    )
+    """A dictionary of failed responses, keyed by request UUID."""
+
+
+type Requests[T: Hashable] = dict[UUID, Request[T]]
+
 #######################################################################################
 # Root Models
 #######################################################################################
 ResponseMetadataRoot = RootModel[ResponseMetadata]
 ResponseRoot = RootModel[Response[Hashable]]
+RequestsRoot = RootModel[Requests[Hashable]]
+ResponsesRoot = RootModel[Responses[Hashable]]

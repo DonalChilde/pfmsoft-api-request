@@ -699,7 +699,8 @@ def test_process_requests_maps_intermediate_results() -> None:
         requester._dispatch_requests = fake_dispatch  # pyright: ignore[reportPrivateUsage]
 
         results = await requester.process_requests(request_map)
-        assert request_key in results
-        assert results[request_key].request == request
+        assert request_key in results.successful
+        assert results.successful[request_key].request == request
+        assert not results.failed
 
     asyncio.run(run())
