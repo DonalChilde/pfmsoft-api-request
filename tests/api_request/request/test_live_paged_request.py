@@ -200,7 +200,7 @@ def test_live_universe_types_cache_data_matches_original_response() -> None:
         }
 
         # Primary check for this live-paged test: cache data equals original data.
-        assert second_response.text == first_response.text
+        assert second_response.json == first_response.json
         first_payload = first_response.json_loads
         second_payload = second_response.json_loads
         assert first_payload == second_payload

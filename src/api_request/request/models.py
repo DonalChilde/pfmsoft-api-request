@@ -8,7 +8,6 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 from pydantic import RootModel
-from pydantic_core import from_json
 from whenever import Instant
 
 logger = logging.getLogger(__name__)
@@ -209,8 +208,8 @@ class Response[T: Hashable]:
 
     metadata: ResponseMetadata
     """The metadata of the response, including status code, headers, etc."""
-    text: str
-    """The body of the response as a string."""
+    json: Any
+    """The parsed JSON body of the response."""
     request: Request[T]
     """The original request that generated this response."""
     source: Source
@@ -230,12 +229,12 @@ class Response[T: Hashable]:
 
     @property
     def json_loads(self) -> Any:
-        """Parse the body text as JSON, if possible.
+        """Get the parsed JSON body.
 
         Returns:
             The parsed JSON object.
         """
-        return from_json(self.text)
+        return self.json
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -245,8 +244,8 @@ class FailedResponse[T: Hashable]:
     metadata: ResponseMetadata | None = None
     """The metadata of the response, including status code, headers, etc. May be None 
     if the request failed before receiving a response."""
-    text: str | None = None
-    """The body of the response as a string. May be None if the request failed before receiving a response."""
+    json: Any | None = None
+    """The parsed JSON body of the response. May be None if unavailable."""
     request: Request[T]
     """The original request that generated this failed response."""
     error_messages: list[str] = field(default_factory=list[str])

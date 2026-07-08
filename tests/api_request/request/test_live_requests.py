@@ -175,7 +175,7 @@ def test_live_status_request_cache_behavior_reuses_cached_entry() -> None:
         assert isinstance(second_response, Response)
         assert first_response.metadata.status_code == 200
         assert second_response.metadata.status_code == 200
-        assert first_response.text == second_response.text
+        assert first_response.json == second_response.json
         assert first_response.source == Source.NETWORK
         assert second_response.source in {
             Source.CACHE,

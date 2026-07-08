@@ -248,14 +248,14 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
     def _as_cached_response(
         *,
         cache_key: UUID,
-        text: str,
+        json: Any,
         metadata: ResponseMetadata,
         etag: str | None = None,
     ) -> CachedResponse:
         """Build a cache model from response primitives."""
         return CachedResponse(
             cache_key=cache_key,
-            response_text=text,
+            response_text=json_io.json_dumps(json),
             response_metadata_json=metadata.as_string,
             etag=etag if etag is not None else metadata.etag,
             expires_at=metadata.expires_at,
@@ -263,16 +263,15 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         )
 
     @staticmethod
-    def _merge_paged_json_lists(first_text: str, other_texts: list[str]) -> str:
+    def _merge_paged_json_lists(first_json: Any, other_jsons: list[Any]) -> list[Any]:
         """Merge paged JSON list payloads by concatenating array elements."""
         merged: list[object] = []
-        all_texts = [first_text, *other_texts]
-        for text in all_texts:
-            payload: Any = json_io.json_loads(text)
+        all_payloads = [first_json, *other_jsons]
+        for payload in all_payloads:
             if not isinstance(payload, list):
                 raise ValueError("Paged response body is not a JSON list")
             merged.extend(cast(list[object], payload))
-        return json_io.json_dumps(merged)
+        return merged
 
     async def __aenter__(self) -> Self:
         """Enter the asynchronous context manager."""
@@ -349,14 +348,14 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                 case SuccessfulResponseBase():
                     successful[request_id] = Response(
                         metadata=intermediate.metadata,
-                        text=intermediate.text,
+                        json=intermediate.json,
                         request=intermediate.request,
                         source=intermediate.source,
                     )
                 case FailWithResponse():
                     failed[request_id] = FailedResponse(
                         metadata=intermediate.metadata,
-                        text=intermediate.text,
+                        json=intermediate.json,
                         request=intermediate.request,
                         error_messages=[
                             f"HTTP {intermediate.metadata.status_code} {intermediate.metadata.reason_phrase}"
@@ -428,7 +427,16 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             return FailNoResponse(request=request.request, error_message=str(exc))
 
         metadata = self._http_response_to_metadata(http_response)
-        text = http_response.text
+        response_text = http_response.text
+        parsed_json: Any | None = None
+        if response_text != "":
+            try:
+                parsed_json = json_io.json_loads(response_text)
+            except Exception as exc:  # noqa: BLE001
+                return FailNoResponse(
+                    request=request.request,
+                    error_message=f"Failed to parse response JSON: {exc}",
+                )
         status_code = metadata.status_code
 
         is_explicit_success = (
@@ -439,7 +447,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             success = SuccessfulResponse(
                 request=request.request,
                 metadata=metadata,
-                text=text,
+                json=parsed_json,
                 source=Source.NETWORK,
             )
             if (
@@ -452,10 +460,14 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
         if self._is_known_failure_status(status_code):
             return FailWithResponse(
-                request=request.request, metadata=metadata, text=text
+                request=request.request, metadata=metadata, json=parsed_json
             )
 
-        return FailWithResponse(request=request.request, metadata=metadata, text=text)
+        return FailWithResponse(
+            request=request.request,
+            metadata=metadata,
+            json=parsed_json,
+        )
 
     async def _cacheable_request(
         self, request: CachableRequest[T]
@@ -471,7 +483,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             if isinstance(response, SuccessfulResponseBase):
                 await cache.set(
                     request.cache_key,
-                    response.text,
+                    json_io.json_dumps(response.json),
                     response.metadata,
                 )
             return response
@@ -481,7 +493,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             return SuccessfulResponse(
                 request=request.request,
                 metadata=cached_metadata,
-                text=cached_response.response_text,
+                json=json_io.json_loads(cached_response.response_text),
                 source=Source.CACHE,
             )
 
@@ -508,24 +520,24 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                 return Response304FromStaleCache(
                     request=request.request,
                     metadata=self._cached_metadata(refreshed_cached_response),
-                    text=refreshed_cached_response.response_text,
+                    json=json_io.json_loads(refreshed_cached_response.response_text),
                 )
             case 200:
                 await cache.set(
                     request.cache_key,
-                    refreshed.text,
+                    json_io.json_dumps(refreshed.json),
                     refreshed.metadata,
                 )
                 return Response200FromStaleCache(
                     request=request.request,
                     metadata=refreshed.metadata,
-                    text=refreshed.text,
+                    json=refreshed.json,
                 )
             case _:
                 return FailWithResponse(
                     request=request.request,
                     metadata=refreshed.metadata,
-                    text=refreshed.text,
+                    json=refreshed.json,
                 )
 
     def _is_paged_response(self, response: SuccessfulResponse[T]) -> bool:
@@ -565,9 +577,9 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             )
 
         try:
-            merged_text = self._merge_paged_json_lists(
-                response.text,
-                [item.text for item in paged_responses],
+            merged_json = self._merge_paged_json_lists(
+                response.json,
+                [item.json for item in paged_responses],
             )
         except Exception as exc:  # noqa: BLE001
             return FailNoResponse(request=response.request, error_message=str(exc))
@@ -575,7 +587,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         return SuccessfulResponse(
             request=response.request,
             metadata=response.metadata,
-            text=merged_text,
+            json=merged_json,
             source=response.source,
         )
 

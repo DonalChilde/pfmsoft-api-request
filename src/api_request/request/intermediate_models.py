@@ -10,6 +10,7 @@ part of the stable public package API and may change during internal refactors.
 
 from collections.abc import Hashable
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from api_request.request.models import Request, ResponseMetadata, Source
@@ -47,8 +48,8 @@ class FailWithResponse[T: Hashable](FailedRequestBase[T]):
 
     metadata: ResponseMetadata
     """The metadata of the response, including status code and headers."""
-    text: str
-    """The body of the response as a string."""
+    json: Any
+    """The parsed JSON body of the response."""
 
 
 @dataclass(slots=True, kw_only=True)
@@ -62,8 +63,8 @@ class SuccessfulResponseBase[T: Hashable](IntermediateResponseBase[T]):
 
     metadata: ResponseMetadata
     """The metadata of the response, including status code and headers."""
-    text: str
-    """The body of the response as a string."""
+    json: Any
+    """The parsed JSON body of the response."""
     source: Source
     """The source of the response, for example cache or network."""
 

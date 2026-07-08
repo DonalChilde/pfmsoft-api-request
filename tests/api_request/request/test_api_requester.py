@@ -276,7 +276,7 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
 
         assert isinstance(result, Response304FromStaleCache)
         assert result.metadata.status_code == 200
-        assert result.text == "[1]"
+        assert result.json == [1]
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
 
@@ -380,7 +380,7 @@ def test_cacheable_request_returns_fresh_cache_hit() -> None:
 
         assert isinstance(result, SuccessfulResponse)
         assert result.source == Source.CACHE
-        assert result.text == "[1]"
+        assert result.json == [1]
         assert len(cache.updated) == 0
 
     asyncio.run(run())
@@ -438,7 +438,7 @@ def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
         )
 
         assert isinstance(result, Response200FromStaleCache)
-        assert result.text == "[2]"
+        assert result.json == [2]
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
 
@@ -504,7 +504,7 @@ def test_cacheable_request_refreshes_stale_paged_entry_on_200() -> None:
         )
 
         assert isinstance(result, Response200FromStaleCache)
-        assert result.text == "[2,3]"
+        assert result.json == [2, 3]
         assert len(cache.updated) == 1
         assert cache.updated[0][0] == cache_key
         assert cache.updated[0][1].response_text == "[2,3]"
@@ -611,14 +611,14 @@ def test_handle_paged_response_merges_json_lists() -> None:
         paged = SuccessfulResponse(
             request=request,
             metadata=first_metadata,
-            text=first_text,
+            json=[1],
             source=Source.NETWORK,
         )
 
         result = await requester._handle_paged_response(paged)  # pyright: ignore[reportPrivateUsage]
 
         assert isinstance(result, SuccessfulResponse)
-        assert result.text == "[1,2]"
+        assert result.json == [1, 2]
 
     asyncio.run(run())
 
@@ -654,7 +654,7 @@ def test_handle_paged_response_fails_on_source_drift() -> None:
         paged = SuccessfulResponse(
             request=request,
             metadata=first_metadata,
-            text=first_text,
+            json=[1],
             source=Source.NETWORK,
         )
 
@@ -692,7 +692,7 @@ def test_process_requests_maps_intermediate_results() -> None:
                 request_key: Response304FromStaleCache(
                     request=request,
                     metadata=metadata,
-                    text="[1]",
+                    json=[1],
                 )
             }
 
