@@ -122,10 +122,17 @@ def request(
     If you need to generate a UUID for a request, you can use the `uuidgen` command-line
     tool or any other UUID generator.
 
+    Using `uuidgen`:
+    ```bash
+    uuidgen
+    ```
+
     Using python:
+    ```bash
     python -c "import uuid; print(uuid.uuid4())"
     or
     python3 -c "import uuid; print(uuid.uuid4())"
+    ```
     """
     if quiet:
         messenger = Console(stderr=True, quiet=True)
