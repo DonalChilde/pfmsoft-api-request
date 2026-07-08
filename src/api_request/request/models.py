@@ -4,7 +4,7 @@ import logging
 from collections.abc import Hashable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any, Mapping, cast
 from uuid import UUID
 
 from pydantic import RootModel
