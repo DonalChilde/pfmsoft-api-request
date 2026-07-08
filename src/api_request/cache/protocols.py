@@ -1,4 +1,19 @@
-"""Cache protocols for API requests."""
+"""Cache protocols and factory contracts for API requests.
+
+The protocol in this module defines the behavioral contract shared by cache
+implementations such as in-memory and SQLite providers.
+
+Typical usage:
+
+```python
+cache_factory: CacheFactory = ...
+cache = cache_factory()
+async with cache:
+    cached = await cache.get(cache_key)
+    if cached is None:
+        cached = await cache.set(cache_key, text, metadata)
+```
+"""
 
 from collections.abc import Callable
 from types import TracebackType
@@ -10,6 +25,12 @@ from api_request.request.models import ResponseMetadata
 
 
 class CacheProtocol(Protocol):
+    """Behavioral contract for cache providers used by request execution.
+
+    Implementations are expected to support async context management for
+    lifecycle concerns (for example, opening and closing database connections).
+    """
+
     async def __aenter__(self) -> Self:
         """Enter the asynchronous context manager."""
         ...
@@ -24,7 +45,10 @@ class CacheProtocol(Protocol):
         ...
 
     async def get(self, cache_key: UUID) -> CachedResponse | None:
-        """Get a cached response by cache key."""
+        """Get a cached response by key.
+
+        Returns `None` when no entry exists.
+        """
         ...
 
     async def set(
@@ -60,8 +84,8 @@ class CacheProtocol(Protocol):
     ) -> CachedResponse:
         """Refresh an existing cached response from a 304 revalidation.
 
-        This operation updates metadata fields while preserving the existing cached
-        body text and cached-success representation.
+        This operation updates metadata fields while preserving the existing
+        cached body text and cached-success representation.
 
         Contract:
             - Entry must already exist for `cache_key`.
@@ -69,8 +93,9 @@ class CacheProtocol(Protocol):
             - Stored and returned metadata must continue to represent the cached body
               as a successful response rather than a raw `304 Not Modified`
               response.
-            - Metadata-derived fields are refreshed by merging the existing cached
-              metadata with the revalidation response headers and timing data.
+                        - Metadata-derived fields are refreshed by merging the existing
+                            cached metadata with the revalidation response headers and timing
+                            data.
             - The merged result is then used to populate `response_metadata_json`,
               `etag`, `last_modified`, and `expires_at`.
             - `cache_timestamp` is set to the current update time in nanoseconds.
@@ -94,7 +119,10 @@ class CacheProtocol(Protocol):
         ...
 
     async def delete(self, cache_key: UUID) -> None:
-        """Delete a cached response from the cache."""
+        """Delete a cached response.
+
+        This operation is idempotent: deleting a missing key does not raise.
+        """
         ...
 
     async def clear(
@@ -104,8 +132,8 @@ class CacheProtocol(Protocol):
 
         Filter behavior:
             - `only_expired=True`: remove only expired entries.
-            - `age_limit` set: remove entries whose age is greater than or equal to
-              the nanosecond threshold.
+                        - `age_limit` set: remove entries whose age is greater than or equal
+                            to the provided nanosecond age threshold.
             - both set: remove entries that satisfy both criteria.
             - neither set: remove all entries.
         """
@@ -127,12 +155,10 @@ CacheFactory = Callable[[], CacheProtocol]
 
 
 class CacheFactoryProtocol(Protocol):
-    """A protocol for a cache factory that produces instances of CacheProtocol.
+    """Callable contract for building `CacheProtocol` instances.
 
-    This protocol defines a callable that returns a new instance of a cache provider
-    that adheres to the CacheProtocol. It is used to create cache instances for use
-    with the ApiRequester, allowing for different caching strategies to be implemented
-    and swapped as needed.
+    Factories return a new cache provider instance that can be used by request
+    execution components.
     """
 
     def __call__(self) -> CacheProtocol:

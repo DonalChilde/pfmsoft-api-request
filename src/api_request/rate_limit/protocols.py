@@ -1,40 +1,37 @@
-"""Rate-limiter protocols and aiolimiter-backed implementations.
+"""Rate-limiter protocol contracts.
 
-This module defines a reusable protocol shape for request gating and provides a
-concrete implementation backed by `aiolimiter.AsyncLimiter`.
+This module defines the protocol shape used to gate outbound request work.
+Concrete implementations live in sibling modules.
 
 Protocol contract:
         - Each `limit(subject)` call returns an async context manager used to gate one
             operation.
         - Implementations may choose how `subject` influences behavior.
 
-Concrete behavior in this module:
-        - `AiolimiterRateLimiter` uses one shared `AsyncLimiter` bucket for all calls.
-        - `subject` is accepted for API compatibility but ignored by the concrete
-            implementation.
+The default concrete implementation in this package currently uses one shared
+bucket and ignores `subject`.
 
 Typical usage:
-        limiter = AiolimiterRateLimiterFactory(max_rate=100.0, time_period=60.0)()
-        async with limiter.limit("market/orders"):
-                # perform one rate-limited operation
-                ...
+    limiter = AiolimiterRateLimiterFactory(max_rate=100.0, time_period=60.0)()
+    async with limiter.limit("market/orders"):
+        # perform one rate-limited operation
+        ...
 
 Typed construction with ApiRequester:
     from uuid import UUID, uuid4
 
-    from api_request.models import Request
-    from api_request.rate_limiter import AiolimiterRateLimiterFactory
-    from api_request.request import ApiRequester
+    from api_request import ApiRequester, Request
+    from api_request.rate_limit import AiolimiterRateLimiterFactory
 
-    # Replace with your concrete cache factory.
+    # Replace with your chosen cache factory.
     cache_factory = ...
     rate_limiter_factory = AiolimiterRateLimiterFactory(
         max_rate=100.0,
         time_period=60.0,
     )
 
-    requests: dict[UUID, Request[str]] = {
-        uuid4(): Request[str](
+    requests: dict[UUID, Request] = {
+        uuid4(): Request(
             request_key=uuid4(),
             url="https://esi.evetech.net/latest/status/",
             method="GET",
@@ -44,7 +41,7 @@ Typed construction with ApiRequester:
 
 
     async def run() -> None:
-        async with ApiRequester[str](
+        async with ApiRequester(
             cache_factory=cache_factory,
             rate_limiter_factory=rate_limiter_factory,
         ) as requester:
