@@ -67,7 +67,7 @@ Operational contracts:
 
 import asyncio
 import logging
-from dataclasses import replace
+from dataclasses import asdict, replace
 from time import perf_counter
 from types import TracebackType
 from typing import Any, Self, cast
@@ -116,6 +116,36 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
+class ForcedFailureError(Exception):
+    """Error raised during forced failure of request processing.
+
+    This error can be raised during a primary failure, with `fail_with_response` set to
+    the original failure, or it can be raised from a flag chack as a signal to abort the
+    entire batch of requests.
+    """
+
+    def __init__(
+        self,
+        request: Request,
+        fail_with_response: FailWithResponse | None = None,
+        from_flag: bool = False,
+    ) -> None:
+        self.request = request
+        self.fail_with_response = fail_with_response
+        self.from_other_failure_flag = from_flag
+        if self.from_other_failure_flag:
+            super().__init__(
+                f"ForcedFailureError: Forced failure triggered for request "
+                f"{request.request_key} due to failure of another request."
+            )
+        else:
+            super().__init__(
+                f"ForcedFailureError: Forced failure triggered for request "
+                f"{request.request_key} with response status code: "
+                f"{fail_with_response.metadata.status_code if fail_with_response else None}."
+            )
+
+
 class ApiRequester(ApiRequesterProtocol):
     """Orchestrates cache-aware and rate-limited API request execution."""
 
@@ -138,6 +168,7 @@ class ApiRequester(ApiRequesterProtocol):
         self,
         cache_factory: CacheFactory,
         rate_limiter_factory: RateLimiterFactoryProtocol,
+        force_fail_on: set[int] | None = None,
     ) -> None:
         """Initialize the ApiRequester with a cache factory."""
         self._client: AsyncClient | None = None
@@ -145,6 +176,22 @@ class ApiRequester(ApiRequesterProtocol):
         self._rate_limit: RateLimiterProtocol | None = None
         self._cache_factory = cache_factory
         self._rate_limiter_factory = rate_limiter_factory
+        self._force_fail_on = force_fail_on or set()
+        """A set of HTTP status codes that will trigger a forced failure for the entire batch."""
+        self._force_failure: bool = False
+
+    def _check_force_failure(self) -> None:
+        """Check if the request processing should be forcefully failed.
+
+        Should be called right before and after rate limit gate to catch both states.
+
+        Should be called with request? to enable good logging info on state?
+
+        This is a placeholder for future logic that may determine if the entire
+        batch of requests should be aborted due to a fatal error or other conditions.
+        """
+        if self._force_failure:
+            raise ForcedFailureError("Forced failure triggered for request processing.")
 
     @classmethod
     def _is_success_status(cls, status_code: int) -> bool:
@@ -390,6 +437,7 @@ class ApiRequester(ApiRequesterProtocol):
                     raise
                 return FailNoResponse(request=request, error_message=str(exc))
 
+        # TODO Explore options to fail entire group if any request fails fatally.
         task_keys = list(requests.keys())
         task_values = [asyncio.create_task(execute(requests[k])) for k in task_keys]
         results = await asyncio.gather(*task_values)
