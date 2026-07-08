@@ -6,7 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import timedelta
-from types import SimpleNamespace
+from types import SimpleNamespace, TracebackType
 from uuid import UUID, uuid4
 
 from whenever import Instant
@@ -67,7 +67,7 @@ class _FakeCache:
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
-        traceback,
+        traceback: TracebackType | None,
     ) -> None:
         _ = exc_type, exc_value, traceback
 
@@ -141,7 +141,7 @@ class _FakeRateLimiter:
 
 
 def _build_request(*, cache_key: UUID | None = None) -> Request[str]:
-    return Request[str](
+    return Request(
         request_key=uuid4(),
         url="https://example.invalid/data",
         method="GET",
@@ -156,9 +156,9 @@ def _build_requester(
     *,
     responses: list[_FakeHttpResponse],
     cached_response: CachedResponse | None = None,
-) -> tuple[ApiRequester[str], _FakeCache]:
+) -> tuple[ApiRequester, _FakeCache]:
     cache = _FakeCache(cached_response=cached_response)
-    requester = ApiRequester[str](
+    requester = ApiRequester(
         cache_factory=lambda: cache,
         rate_limiter_factory=lambda: _FakeRateLimiter(),
     )

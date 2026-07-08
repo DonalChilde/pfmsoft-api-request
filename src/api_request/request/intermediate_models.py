@@ -8,7 +8,6 @@ They are importable across implementation modules and tests, but they are not
 part of the stable public package API and may change during internal refactors.
 """
 
-from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -17,25 +16,25 @@ from api_request.request.models import Request, ResponseMetadata, Source
 
 
 @dataclass(slots=True, kw_only=True)
-class IntermediateRequestBase[T: Hashable]:
+class IntermediateRequestBase:
     """Base model for intermediate request pipeline objects."""
 
-    request: Request[T]
+    request: Request
     """The original request that generated this intermediate object."""
 
 
 @dataclass(slots=True, kw_only=True)
-class IntermediateResponseBase[T: Hashable](IntermediateRequestBase[T]):
+class IntermediateResponseBase(IntermediateRequestBase):
     """Base model for intermediate responses used during request processing."""
 
 
 @dataclass(slots=True, kw_only=True)
-class FailedRequestBase[T: Hashable](IntermediateResponseBase[T]):
+class FailedRequestBase(IntermediateResponseBase):
     """Base model for failed intermediate responses."""
 
 
 @dataclass(slots=True, kw_only=True)
-class FailNoResponse[T: Hashable](FailedRequestBase[T]):
+class FailNoResponse(FailedRequestBase):
     """Intermediate failure used when no response was received."""
 
     error_message: str
@@ -43,7 +42,7 @@ class FailNoResponse[T: Hashable](FailedRequestBase[T]):
 
 
 @dataclass(slots=True, kw_only=True)
-class FailWithResponse[T: Hashable](FailedRequestBase[T]):
+class FailWithResponse(FailedRequestBase):
     """Intermediate failure used when a response indicates failure."""
 
     metadata: ResponseMetadata
@@ -53,12 +52,12 @@ class FailWithResponse[T: Hashable](FailedRequestBase[T]):
 
 
 @dataclass(slots=True, kw_only=True)
-class UnprocessedRequest[T: Hashable](IntermediateRequestBase[T]):
+class UnprocessedRequest(IntermediateRequestBase):
     """Intermediate request that has not yet been sent."""
 
 
 @dataclass(slots=True, kw_only=True)
-class SuccessfulResponseBase[T: Hashable](IntermediateResponseBase[T]):
+class SuccessfulResponseBase(IntermediateResponseBase):
     """Base model for successful intermediate responses."""
 
     metadata: ResponseMetadata
@@ -70,12 +69,12 @@ class SuccessfulResponseBase[T: Hashable](IntermediateResponseBase[T]):
 
 
 @dataclass(slots=True, kw_only=True)
-class SuccessfulResponse[T: Hashable](SuccessfulResponseBase[T]):
+class SuccessfulResponse(SuccessfulResponseBase):
     """Successful intermediate response used during request processing."""
 
 
 @dataclass(slots=True, kw_only=True)
-class CachableRequest[T: Hashable](UnprocessedRequest[T]):
+class CachableRequest(UnprocessedRequest):
     """Intermediate request that has an associated cache key."""
 
     cache_key: UUID
@@ -83,7 +82,7 @@ class CachableRequest[T: Hashable](UnprocessedRequest[T]):
 
 
 @dataclass(slots=True, kw_only=True)
-class RequestFromStaleCache[T: Hashable](CachableRequest[T]):
+class RequestFromStaleCache(CachableRequest):
     """A stale cached request that needs revalidation."""
 
     etag: str | None
@@ -107,14 +106,14 @@ class RequestFromStaleCache[T: Hashable](CachableRequest[T]):
 
 
 @dataclass(slots=True, kw_only=True)
-class Response304FromStaleCache[T: Hashable](SuccessfulResponseBase[T]):
+class Response304FromStaleCache(SuccessfulResponseBase):
     """A cached-body response refreshed by an HTTP 304 revalidation."""
 
     source: Source = Source.CACHE_304
 
 
 @dataclass(slots=True, kw_only=True)
-class Response200FromStaleCache[T: Hashable](SuccessfulResponseBase[T]):
+class Response200FromStaleCache(SuccessfulResponseBase):
     """A refreshed cached response replaced by an HTTP 200 revalidation."""
 
     source: Source = Source.CACHE_200

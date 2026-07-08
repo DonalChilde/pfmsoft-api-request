@@ -16,7 +16,7 @@ from api_request.cache import InMemoryCache
 from api_request.rate_limit import AiolimiterRateLimiterFactory
 
 logger = logging.getLogger(__name__)
-_shared_live_universe_types_response: Response[str] | None = None
+_shared_live_universe_types_response: Response | None = None
 """Shared response for universe types, to avoid repeated live requests."""
 max_rate = 20
 """Maximum number of requests per time period for the rate limiter."""
@@ -24,7 +24,7 @@ time_period = 0.1
 """Time period in seconds for the rate limiter."""
 
 
-def build_universe_types_request() -> Request[str]:
+def build_universe_types_request() -> Request:
     """This request demonstrates a simple paged GET request to the ESI universe types endpoint.
 
     It is used to test the live request functionality of the API client.
@@ -51,9 +51,7 @@ def build_universe_types_request() -> Request[str]:
     )
 
 
-async def _fetch_live_universe_types_response(
-    *, reuse_shared: bool = True
-) -> Response[str]:
+async def _fetch_live_universe_types_response(*, reuse_shared: bool = True) -> Response:
     """Fetch the live universe types response, optionally reusing a shared result."""
     global _shared_live_universe_types_response
 
@@ -68,9 +66,9 @@ async def _fetch_live_universe_types_response(
     request = build_universe_types_request()
     request_id = request.request_key
 
-    async with ApiRequester[str](
+    async with ApiRequester(
         cache_factory=InMemoryCache,
-        rate_limiter_factory=AiolimiterRateLimiterFactory[str](
+        rate_limiter_factory=AiolimiterRateLimiterFactory(
             max_rate=max_rate,
             time_period=time_period,
         ),
@@ -157,9 +155,9 @@ def test_live_universe_types_cache_data_matches_original_response() -> None:
             rate_key=seed.rate_key,
         )
 
-        async with ApiRequester[str](
+        async with ApiRequester(
             cache_factory=lambda: cache,
-            rate_limiter_factory=AiolimiterRateLimiterFactory[str](
+            rate_limiter_factory=AiolimiterRateLimiterFactory(
                 max_rate=max_rate,
                 time_period=time_period,
             ),

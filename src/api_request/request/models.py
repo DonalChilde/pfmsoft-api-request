@@ -1,7 +1,6 @@
 """Models for API requests."""
 
 import logging
-from collections.abc import Hashable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, cast
@@ -21,7 +20,7 @@ type PARAMETER = str | int | float
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class Request[T: Hashable]:
+class Request:
     """Represents an API request."""
 
     request_key: UUID = field(default_factory=uuid4)
@@ -38,7 +37,7 @@ class Request[T: Hashable]:
     """The query parameters of the API request."""
     cache_key: UUID | None = None
     """The UUID key for the cached response. If None, the response is not cached."""
-    rate_key: T | None = None
+    rate_key: str | None = None
     """Optional key used by rate-limiter implementations to group requests."""
 
 
@@ -203,33 +202,33 @@ class ResponseMetadata:
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class Response[T: Hashable]:
+class Response:
     """Represents an ESI response."""
 
     metadata: ResponseMetadata
     """The metadata of the response, including status code, headers, etc."""
     json: Any
     """The parsed JSON body of the response."""
-    request: Request[T]
+    request: Request
     """The original request that generated this response."""
     source: Source
     """The source of the response, for example cache or network."""
 
     def to_string(self, indent: int) -> str:
         """Return a string representation of the Response with the specified indentation."""
-        root_model = RootModel[Response[Hashable]](cast(Response[Hashable], self))
+        root_model = RootModel[Response](cast(Response, self))
         json_str = root_model.model_dump_json(indent=indent)
         return json_str
 
     @classmethod
-    def from_string(cls, json_str: str) -> Response[T]:
+    def from_string(cls, json_str: str) -> Response:
         """Parse the Response from a JSON string."""
-        value = RootModel[Response[Hashable]].model_validate_json(json_str).root
-        return cast(Response[T], value)
+        value = RootModel[Response].model_validate_json(json_str).root
+        return value
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class FailedResponse[T: Hashable]:
+class FailedResponse:
     """Represents a failed ESI response, typically due to an error status code."""
 
     metadata: ResponseMetadata | None = None
@@ -237,28 +236,28 @@ class FailedResponse[T: Hashable]:
     if the request failed before receiving a response."""
     json: Any | None = None
     """The parsed JSON body of the response. May be None if unavailable."""
-    request: Request[T]
+    request: Request
     """The original request that generated this failed response."""
     error_messages: list[str] = field(default_factory=list[str])
     """An optional list of error messages describing the failure."""
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
-class Responses[T: Hashable]:
-    successful: dict[UUID, Response[T]] = field(default_factory=dict[UUID, Response[T]])
+class Responses:
+    successful: dict[UUID, Response] = field(default_factory=dict[UUID, Response])
     """A dictionary of successful responses, keyed by request UUID."""
-    failed: dict[UUID, FailedResponse[T]] = field(
-        default_factory=dict[UUID, FailedResponse[T]]
+    failed: dict[UUID, FailedResponse] = field(
+        default_factory=dict[UUID, FailedResponse]
     )
     """A dictionary of failed responses, keyed by request UUID."""
 
 
-type Requests[T: Hashable] = dict[UUID, Request[T]]
+type Requests = dict[UUID, Request]
 
 #######################################################################################
 # Root Models
 #######################################################################################
 ResponseMetadataRoot = RootModel[ResponseMetadata]
-ResponseRoot = RootModel[Response[Hashable]]
-RequestsRoot = RootModel[Requests[Hashable]]
-ResponsesRoot = RootModel[Responses[Hashable]]
+ResponseRoot = RootModel[Response]
+RequestsRoot = RootModel[Requests]
+ResponsesRoot = RootModel[Responses]

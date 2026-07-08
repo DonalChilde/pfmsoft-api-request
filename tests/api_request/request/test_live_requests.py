@@ -18,11 +18,11 @@ from api_request.cache import InMemoryCache
 from api_request.rate_limit import AiolimiterRateLimiterFactory
 
 logger = logging.getLogger(__name__)
-_shared_live_status_response: Response[str] | None = None
+_shared_live_status_response: Response | None = None
 """Shared response for the live status request, to avoid making multiple requests during tests."""
 
 
-def build_live_status_request() -> Request[str]:
+def build_live_status_request() -> Request:
     """This request demonstrates a simple GET request to the ESI status endpoint.
 
     It is used to test the live request functionality of the API client.
@@ -53,7 +53,7 @@ def build_live_status_request() -> Request[str]:
     )
 
 
-async def _fetch_live_status_response(*, reuse_shared: bool = True) -> Response[str]:
+async def _fetch_live_status_response(*, reuse_shared: bool = True) -> Response:
     """Fetch the live status response, optionally reusing a shared result."""
     global _shared_live_status_response
 
@@ -68,9 +68,9 @@ async def _fetch_live_status_response(*, reuse_shared: bool = True) -> Response[
     request = build_live_status_request()
     request_id = request.request_key
 
-    async with ApiRequester[str](
+    async with ApiRequester(
         cache_factory=InMemoryCache,
-        rate_limiter_factory=AiolimiterRateLimiterFactory[str](
+        rate_limiter_factory=AiolimiterRateLimiterFactory(
             max_rate=5.0,
             time_period=1.0,
         ),
@@ -150,9 +150,9 @@ def test_live_status_request_cache_behavior_reuses_cached_entry() -> None:
             rate_key=seed.rate_key,
         )
 
-        async with ApiRequester[str](
+        async with ApiRequester(
             cache_factory=lambda: cache,
-            rate_limiter_factory=AiolimiterRateLimiterFactory[str](
+            rate_limiter_factory=AiolimiterRateLimiterFactory(
                 max_rate=5.0,
                 time_period=1.0,
             ),

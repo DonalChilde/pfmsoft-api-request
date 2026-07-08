@@ -14,7 +14,7 @@ Concrete behavior in this module:
             implementation.
 
 Typical usage:
-        limiter = AiolimiterRateLimiterFactory[str](max_rate=100.0, time_period=60.0)()
+        limiter = AiolimiterRateLimiterFactory(max_rate=100.0, time_period=60.0)()
         async with limiter.limit("market/orders"):
                 # perform one rate-limited operation
                 ...
@@ -28,7 +28,7 @@ Typed construction with ApiRequester:
 
     # Replace with your concrete cache factory.
     cache_factory = ...
-    rate_limiter_factory = AiolimiterRateLimiterFactory[str](
+    rate_limiter_factory = AiolimiterRateLimiterFactory(
         max_rate=100.0,
         time_period=60.0,
     )
@@ -51,12 +51,11 @@ Typed construction with ApiRequester:
             await requester.process_requests(requests)
 """
 
-from collections.abc import Hashable
 from contextlib import AbstractAsyncContextManager
 from typing import Protocol
 
 
-class RateLimiterProtocol[T: Hashable](Protocol):
+class RateLimiterProtocol(Protocol):
     """Protocol for a rate limiter that gates async work.
 
     Implementations may produce one-shot limiters for each operation or may
@@ -66,7 +65,7 @@ class RateLimiterProtocol[T: Hashable](Protocol):
     ignore `subject`, or they may use it to select or derive limiter behavior.
     """
 
-    def limit(self, subject: T | None) -> AbstractAsyncContextManager[None]:
+    def limit(self, subject: str | None) -> AbstractAsyncContextManager[None]:
         """Create an async gate for one operation.
 
         Depending on implementation, `subject` may influence behavior. For
@@ -88,7 +87,7 @@ class RateLimiterProtocol[T: Hashable](Protocol):
         ...
 
 
-class RateLimiterFactoryProtocol[T: Hashable](Protocol):
+class RateLimiterFactoryProtocol(Protocol):
     """Protocol for callables that build shared rate-limiter instances.
 
     This protocol is used to create configured rate limiters for use in
@@ -96,6 +95,6 @@ class RateLimiterFactoryProtocol[T: Hashable](Protocol):
     requester/task-group so concurrent work coordinates against shared budget.
     """
 
-    def __call__(self) -> RateLimiterProtocol[T]:
+    def __call__(self) -> RateLimiterProtocol:
         """Build and return a configured shared rate-limiter instance."""
         ...

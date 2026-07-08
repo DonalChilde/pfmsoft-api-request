@@ -14,7 +14,7 @@ from api_request.rate_limit.aio_limiter import (
 def test_limit_returns_same_limiter_for_different_subjects() -> None:
     """The concrete limiter should return one shared async gate for all subjects."""
     limiter = AsyncLimiter(10.0, 1.0)
-    rate_limiter = AiolimiterRateLimiter[str](limiter=limiter)
+    rate_limiter = AiolimiterRateLimiter(limiter=limiter)
 
     first = rate_limiter.limit("subject-a")
     second = rate_limiter.limit("subject-b")
@@ -25,7 +25,7 @@ def test_limit_returns_same_limiter_for_different_subjects() -> None:
 
 def test_factory_builds_concrete_rate_limiter() -> None:
     """The factory should build an AiolimiterRateLimiter wrapper instance."""
-    factory = AiolimiterRateLimiterFactory[str](max_rate=5.0, time_period=1.0)
+    factory = AiolimiterRateLimiterFactory(max_rate=5.0, time_period=1.0)
 
     produced = factory()
 
@@ -38,7 +38,7 @@ def test_shared_limiter_throttles_concurrent_tasks() -> None:
 
     async def run() -> tuple[float, float]:
         limiter = AsyncLimiter(1.0, 0.2)
-        rate_limiter = AiolimiterRateLimiter[str](limiter=limiter)
+        rate_limiter = AiolimiterRateLimiter(limiter=limiter)
         entered_at: list[float] = []
 
         async def gated(subject: str) -> None:

@@ -67,7 +67,6 @@ Operational contracts:
 
 import asyncio
 import logging
-from collections.abc import Hashable
 from dataclasses import replace
 from time import perf_counter
 from types import TracebackType
@@ -117,7 +116,7 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
-class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
+class ApiRequester(ApiRequesterProtocol):
     """Orchestrates cache-aware and rate-limited API request execution."""
 
     _RECOVERABLE_HTTP_STATUSES = frozenset({400, 404, 429})
@@ -138,12 +137,12 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
     def __init__(
         self,
         cache_factory: CacheFactory,
-        rate_limiter_factory: RateLimiterFactoryProtocol[T],
+        rate_limiter_factory: RateLimiterFactoryProtocol,
     ) -> None:
         """Initialize the ApiRequester with a cache factory."""
         self._client: AsyncClient | None = None
         self._cache: CacheProtocol | None = None
-        self._rate_limit: RateLimiterProtocol[T] | None = None
+        self._rate_limit: RateLimiterProtocol | None = None
         self._cache_factory = cache_factory
         self._rate_limiter_factory = rate_limiter_factory
 
@@ -238,7 +237,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         ).root
 
     @staticmethod
-    def _updated_request_headers(request: Request[T], **headers: str) -> Request[T]:
+    def _updated_request_headers(request: Request, **headers: str) -> Request:
         """Return a copy of request with additional/overridden headers."""
         merged_headers = dict(request.headers)
         merged_headers.update(headers)
@@ -311,7 +310,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
             )
         return self._cache
 
-    async def _rate_limit_check(self) -> RateLimiterProtocol[T]:
+    async def _rate_limit_check(self) -> RateLimiterProtocol:
         """Check if the rate limiter is initialized and return it."""
         if self._rate_limit is None:
             raise RuntimeError(
@@ -325,7 +324,7 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         return await self._cache_check()
 
     @property
-    async def rate_limiter(self) -> RateLimiterProtocol[T]:
+    async def rate_limiter(self) -> RateLimiterProtocol:
         """Get the rate limiter instance."""
         return await self._rate_limit_check()
 
@@ -336,13 +335,13 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     async def process_requests(
         self,
-        requests: Requests[T],
-    ) -> Responses[T]:
+        requests: Requests,
+    ) -> Responses:
         """Process a batch of API requests and return their corresponding cached responses."""
         intermediate_responses = await self._dispatch_requests(requests)
 
-        successful: dict[UUID, Response[T]] = {}
-        failed: dict[UUID, FailedResponse[T]] = {}
+        successful: dict[UUID, Response] = {}
+        failed: dict[UUID, FailedResponse] = {}
         for request_id, intermediate in intermediate_responses.items():
             match intermediate:
                 case SuccessfulResponseBase():
@@ -375,11 +374,11 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     async def _dispatch_requests(
         self,
-        requests: Requests[T],
-    ) -> dict[UUID, IntermediateResponseBase[T]]:
+        requests: Requests,
+    ) -> dict[UUID, IntermediateResponseBase]:
         """Dispatch a batch of API requests and return their corresponding intermediate responses."""
 
-        async def execute(request: Request[T]) -> IntermediateResponseBase[T]:
+        async def execute(request: Request) -> IntermediateResponseBase:
             try:
                 if request.cache_key is None:
                     return await self._http_request(UnprocessedRequest(request=request))
@@ -398,11 +397,11 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     async def _http_request(
         self,
-        request: UnprocessedRequest[T],
+        request: UnprocessedRequest,
         *,
         allow_pagination: bool = True,
         expected_success_statuses: set[int] | None = None,
-    ) -> SuccessfulResponseBase[T] | FailedRequestBase[T]:
+    ) -> SuccessfulResponseBase | FailedRequestBase:
         """Perform an HTTP request and return the corresponding intermediate response."""
         session = await self.session
         rate_limiter = await self.rate_limiter
@@ -470,8 +469,8 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         )
 
     async def _cacheable_request(
-        self, request: CachableRequest[T]
-    ) -> SuccessfulResponseBase[T] | FailedRequestBase[T]:
+        self, request: CachableRequest
+    ) -> SuccessfulResponseBase | FailedRequestBase:
         """Perform a cacheable HTTP request and return the corresponding intermediate response."""
         cache = await self.cache
         cached_response = await cache.get(request.cache_key)
@@ -540,19 +539,19 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
                     json=refreshed.json,
                 )
 
-    def _is_paged_response(self, response: SuccessfulResponse[T]) -> bool:
+    def _is_paged_response(self, response: SuccessfulResponse) -> bool:
         """Determine if the response is a paged response."""
         return response.metadata.status_code == 200 and response.metadata.pages > 1
 
     async def _handle_paged_response(
-        self, response: SuccessfulResponse[T]
-    ) -> SuccessfulResponseBase[T] | FailedRequestBase[T]:
+        self, response: SuccessfulResponse
+    ) -> SuccessfulResponseBase | FailedRequestBase:
         """Handle a paged response and return consolidated response."""
         total_pages = response.metadata.pages
         if total_pages <= 1:
             return response
 
-        paged_responses: list[SuccessfulResponseBase[T]] = []
+        paged_responses: list[SuccessfulResponseBase] = []
         pages_start = perf_counter()
         page_responses = await self._gather_paged_responses(response)
         pages_end = perf_counter()
@@ -592,8 +591,8 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
         )
 
     async def _gather_paged_responses(
-        self, response: SuccessfulResponse[T]
-    ) -> list[SuccessfulResponseBase[T] | FailedRequestBase[T]]:
+        self, response: SuccessfulResponse
+    ) -> list[SuccessfulResponseBase | FailedRequestBase]:
         """Fetch all additional pages for a paged response concurrently."""
         tasks = (
             self._http_request(
@@ -606,9 +605,9 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     @staticmethod
     def _build_paged_request(
-        response: SuccessfulResponse[T],
+        response: SuccessfulResponse,
         page_number: int,
-    ) -> UnprocessedRequest[T]:
+    ) -> UnprocessedRequest:
         """Build a request for one additional paged response."""
         return UnprocessedRequest(
             request=replace(
@@ -622,8 +621,8 @@ class ApiRequester[T: Hashable](ApiRequesterProtocol[T]):
 
     def _has_source_changed(
         self,
-        first_response: SuccessfulResponseBase[T],
-        paged_responses: list[SuccessfulResponseBase[T]],
+        first_response: SuccessfulResponseBase,
+        paged_responses: list[SuccessfulResponseBase],
     ) -> bool:
         """Check if the data on the server has changed between the first and subsequent paged responses."""
         # If the last-modified header for the first response does not match the last-modified header

@@ -1,6 +1,5 @@
 """Rate limiter implementation using aiolimiter."""
 
-from collections.abc import Hashable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
@@ -13,7 +12,7 @@ from api_request.rate_limit.protocols import (
 
 
 @dataclass(slots=True)
-class AiolimiterRateLimiter[T: Hashable](RateLimiterProtocol[T]):
+class AiolimiterRateLimiter(RateLimiterProtocol):
     """Shared rate limiter backed by one AsyncLimiter instance.
 
     This implementation enforces a single global bucket for all operations.
@@ -24,7 +23,7 @@ class AiolimiterRateLimiter[T: Hashable](RateLimiterProtocol[T]):
     limiter: AsyncLimiter
     """The shared AsyncLimiter used by all gated operations."""
 
-    def limit(self, subject: T | None) -> AbstractAsyncContextManager[None]:
+    def limit(self, subject: str | None) -> AbstractAsyncContextManager[None]:
         """Return the shared AsyncLimiter as an async context manager.
 
         NOTE: `subject` is accepted for protocol compatibility and future
@@ -40,7 +39,7 @@ class AiolimiterRateLimiter[T: Hashable](RateLimiterProtocol[T]):
 
 
 @dataclass(slots=True, frozen=True)
-class AiolimiterRateLimiterFactory[T: Hashable](RateLimiterFactoryProtocol[T]):
+class AiolimiterRateLimiterFactory(RateLimiterFactoryProtocol):
     """Factory that builds shared aiolimiter-backed rate limiters.
 
     Use one factory per limiter configuration and one produced limiter per
@@ -61,7 +60,7 @@ class AiolimiterRateLimiterFactory[T: Hashable](RateLimiterFactoryProtocol[T]):
     This should be greater than zero.
     """
 
-    def __call__(self) -> AiolimiterRateLimiter[T]:
+    def __call__(self) -> AiolimiterRateLimiter:
         """Build a shared rate limiter instance.
 
         Returns:
