@@ -8,6 +8,8 @@ from api_request import __app_name__, __version__
 from api_request.logging_config import setup_logging
 from api_request.settings import get_settings
 
+from .request import app as request_app
+
 app = typer.Typer(
     name="api-request",
     help="A command-line tool for managing API requests.",
@@ -35,3 +37,6 @@ def default_options(ctx: typer.Context) -> None:
     logger.info(
         f"Starting {__app_name__} v{__version__} with settings: {asdict(settings)!r}"
     )
+
+
+app.add_typer(request_app)

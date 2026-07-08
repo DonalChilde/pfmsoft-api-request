@@ -25,7 +25,7 @@ class ApiRequestSettings:
     @property
     def cache_file(self) -> Path:
         """Get the cache file path."""
-        return self.cache_directory / "cache.sqlite3"
+        return self.cache_directory / "web-cache.sqlite3"
 
     @property
     def logging_directory(self) -> Path:

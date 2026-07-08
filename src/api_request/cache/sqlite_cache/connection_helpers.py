@@ -77,7 +77,11 @@ def create_read_write_connection(db_path: str | Path) -> sqlite3.Connection:
         script are created before the connection is returned.
     """
     if isinstance(db_path, Path):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path = str(db_path.resolve())
+    else:
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        db_path = str(Path(db_path).resolve())
     uri = read_write_uri(db_path)
     connection = sqlite3.connect(uri, uri=True)
     logger.info(f"Created read-write connection to database at {db_path}")

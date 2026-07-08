@@ -23,7 +23,7 @@ license-files = ["LICENSE"]
 # script entry-points
 # COMMAND_NAME = "PATH.TO.ENTRY.MODULE:ENTRY_FUNCTION"
 
-eve-auth = "api_request.cli.main_typer:app"
+api-request = "api_request.cli.request:app"
 
 
 [build-system]

@@ -4,8 +4,8 @@ import logging
 from collections.abc import Hashable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Mapping, cast
-from uuid import UUID
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 from pydantic import RootModel
 from pydantic_core import from_json
@@ -25,7 +25,7 @@ type PARAMETER = str | int | float
 class Request[T: Hashable]:
     """Represents an API request."""
 
-    request_key: UUID
+    request_key: UUID = field(default_factory=uuid4)
     """The UUID key for the request."""
     url: str
     """The URL of the API request."""
