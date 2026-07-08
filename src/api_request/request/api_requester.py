@@ -67,7 +67,7 @@ Operational contracts:
 
 import asyncio
 import logging
-from dataclasses import asdict, replace
+from dataclasses import replace
 from time import perf_counter
 from types import TracebackType
 from typing import Any, Self, cast
@@ -119,19 +119,20 @@ logger.addHandler(logging.NullHandler())
 class ForcedFailureError(Exception):
     """Error raised during forced failure of request processing.
 
-    This error can be raised during a primary failure, with `fail_with_response` set to
-    the original failure, or it can be raised from a flag chack as a signal to abort the
-    entire batch of requests.
+    This error can be raised during a primary failure, with the response metadata and JSON,
+    or it can be raised from a flag check as a signal to abort the entire batch of requests.
     """
 
     def __init__(
         self,
         request: Request,
-        fail_with_response: FailWithResponse | None = None,
+        response_json: Any | None = None,
+        response_metadata: ResponseMetadata | None = None,
         from_flag: bool = False,
     ) -> None:
         self.request = request
-        self.fail_with_response = fail_with_response
+        self.response_json = response_json
+        self.response_metadata = response_metadata
         self.from_other_failure_flag = from_flag
         if self.from_other_failure_flag:
             super().__init__(
@@ -142,7 +143,7 @@ class ForcedFailureError(Exception):
             super().__init__(
                 f"ForcedFailureError: Forced failure triggered for request "
                 f"{request.request_key} with response status code: "
-                f"{fail_with_response.metadata.status_code if fail_with_response else None}."
+                f"{response_metadata.status_code if response_metadata else None}."
             )
 
 
@@ -180,18 +181,36 @@ class ApiRequester(ApiRequesterProtocol):
         """A set of HTTP status codes that will trigger a forced failure for the entire batch."""
         self._force_failure: bool = False
 
-    def _check_force_failure(self) -> None:
+    def _check_force_failure_flag(self, request: Request) -> None:
         """Check if the request processing should be forcefully failed.
 
         Should be called right before and after rate limit gate to catch both states.
 
         Should be called with request? to enable good logging info on state?
 
-        This is a placeholder for future logic that may determine if the entire
-        batch of requests should be aborted due to a fatal error or other conditions.
+        Checks to see if the self_force_failure flag is set, and if so, raises a
+        ForcedFailureError. This is used to receive the signal to abort the entire batch
+        of requests due to a failure in another request.
         """
         if self._force_failure:
-            raise ForcedFailureError("Forced failure triggered for request processing.")
+            raise ForcedFailureError(request=request, from_flag=True)
+
+    def _check_response_for_force_failure(
+        self, request: Request, response_json: Any, response_metadata: ResponseMetadata
+    ) -> None:
+        """Check if the response should trigger a forced failure for the entire batch.
+
+        If the response is a FailWithResponse and its status code is in the
+        self._force_fail_on set, then set the self._force_failure flag to True and raise
+        a ForcedFailureError. This will signal to abort the entire batch of requests.
+        """
+        if response_metadata.status_code in self._force_fail_on:
+            self._force_failure = True
+            raise ForcedFailureError(
+                request=request,
+                response_json=response_json,
+                response_metadata=response_metadata,
+            )
 
     @classmethod
     def _is_success_status(cls, status_code: int) -> bool:
@@ -206,46 +225,45 @@ class ApiRequester(ApiRequesterProtocol):
             case _:
                 return False
 
-    @classmethod
-    def _is_recoverable_status(cls, status_code: int) -> bool:
-        """Return True when a status code should map to `FailedResponse`.
+    # @classmethod
+    # def _is_recoverable_status(cls, status_code: int) -> bool:
+    #     """Return True when a status code should map to `FailedResponse`.
 
-        The initial policy is explicit (`400`, `404`, `429`) and can be expanded
-        by adding values to `_RECOVERABLE_HTTP_STATUSES`.
-        """
-        match status_code:
-            case code if code in cls._RECOVERABLE_HTTP_STATUSES:
-                return True
-            case _:
-                return False
+    #     The initial policy is explicit (`400`, `404`, `429`) and can be expanded
+    #     by adding values to `_RECOVERABLE_HTTP_STATUSES`.
+    #     """
+    #     match status_code:
+    #         case code if code in cls._RECOVERABLE_HTTP_STATUSES:
+    #             return True
+    #         case _:
+    #             return False
 
-    @classmethod
-    def _is_unrecoverable_status(cls, status_code: int) -> bool:
-        """Return True when a status code is a known unrecoverable failure.
+    # @classmethod
+    # def _is_unrecoverable_status(cls, status_code: int) -> bool:
+    #     """Return True when a status code is a known unrecoverable failure.
 
-        The initial policy is explicit (`401`, `403`, `500`, `502`, `503`,
-        `504`) and can be expanded by adding values to
-        `_UNRECOVERABLE_HTTP_STATUSES`.
-        """
-        match status_code:
-            case code if code in cls._UNRECOVERABLE_HTTP_STATUSES:
-                return True
-            case _:
-                return False
+    #     The initial policy is explicit (`401`, `403`, `500`, `502`, `503`,
+    #     `504`) and can be expanded by adding values to
+    #     `_UNRECOVERABLE_HTTP_STATUSES`.
+    #     """
+    #     match status_code:
+    #         case code if code in cls._UNRECOVERABLE_HTTP_STATUSES:
+    #             return True
+    #         case _:
+    #             return False
 
-    @classmethod
-    def _is_known_failure_status(cls, status_code: int) -> bool:
-        """Return True when a status code is in the explicit failure policy."""
-        match status_code:
-            case code if cls._is_recoverable_status(code):
-                return True
-            case code if cls._is_unrecoverable_status(code):
-                return True
-            case _:
-                return False
+    # @classmethod
+    # def _is_known_failure_status(cls, status_code: int) -> bool:
+    #     """Return True when a status code is in the explicit failure policy."""
+    #     match status_code:
+    #         case code if cls._is_recoverable_status(code):
+    #             return True
+    #         case code if cls._is_unrecoverable_status(code):
+    #             return True
+    #         case _:
+    #             return False
 
-    @staticmethod
-    def _is_fatal_exception(exc: Exception) -> bool:
+    def _is_fatal_exception(self, exc: Exception) -> bool:
         """Return True when an exception should fail-fast the whole batch.
 
         Fatal errors represent infrastructure/configuration/programming defects.
@@ -254,6 +272,7 @@ class ApiRequester(ApiRequesterProtocol):
         """
         match exc:
             case RuntimeError():
+                self._force_failure = True
                 return True
             case _:
                 return False
@@ -385,6 +404,7 @@ class ApiRequester(ApiRequesterProtocol):
         requests: Requests,
     ) -> Responses:
         """Process a batch of API requests and return their corresponding cached responses."""
+        self._force_failure = False
         intermediate_responses = await self._dispatch_requests(requests)
 
         successful: dict[UUID, Response] = {}
@@ -437,7 +457,6 @@ class ApiRequester(ApiRequesterProtocol):
                     raise
                 return FailNoResponse(request=request, error_message=str(exc))
 
-        # TODO Explore options to fail entire group if any request fails fatally.
         task_keys = list(requests.keys())
         task_values = [asyncio.create_task(execute(requests[k])) for k in task_keys]
         results = await asyncio.gather(*task_values)
@@ -460,7 +479,11 @@ class ApiRequester(ApiRequesterProtocol):
                 **request.conditional_headers,
             }
         try:
+            # Check for forced failure before making the request
+            self._check_force_failure_flag(request.request)
             async with rate_limiter.limit(request.request.rate_key):
+                # Check for forced failure after passing the rate limit gate
+                self._check_force_failure_flag(request.request)
                 http_response = await session.request(
                     method=request.request.method,
                     url=request.request.url,
@@ -504,11 +527,11 @@ class ApiRequester(ApiRequesterProtocol):
             ):
                 return await self._handle_paged_response(success)
             return success
-
-        if self._is_known_failure_status(status_code):
-            return FailWithResponse(
-                request=request.request, metadata=metadata, json=parsed_json
-            )
+        # Check for the need for forced failure based on the response status code and
+        # the configured force_fail_on set
+        self._check_response_for_force_failure(
+            request.request, response_json=parsed_json, response_metadata=metadata
+        )
 
         return FailWithResponse(
             request=request.request,

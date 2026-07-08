@@ -156,11 +156,13 @@ def _build_requester(
     *,
     responses: list[_FakeHttpResponse],
     cached_response: CachedResponse | None = None,
+    force_fail_on: set[int] | None = None,
 ) -> tuple[ApiRequester, _FakeCache]:
     cache = _FakeCache(cached_response=cached_response)
     requester = ApiRequester(
         cache_factory=lambda: cache,
         rate_limiter_factory=lambda: _FakeRateLimiter(),
+        force_fail_on=force_fail_on,
     )
     requester._client = _FakeAsyncClient(responses)  # pyright: ignore[reportPrivateUsage]
     requester._cache = cache  # pyright: ignore[reportPrivateUsage]
@@ -538,14 +540,103 @@ def test_http_request_uses_fail_with_response_for_404() -> None:
     asyncio.run(run())
 
 
-def test_unrecoverable_status_helpers_identify_seeded_statuses() -> None:
-    """The explicit status policy helpers should expose unrecoverable seeds."""
-    assert ApiRequester._is_unrecoverable_status(401)  # pyright: ignore[reportPrivateUsage]
-    assert ApiRequester._is_unrecoverable_status(503)  # pyright: ignore[reportPrivateUsage]
-    assert not ApiRequester._is_unrecoverable_status(404)  # pyright: ignore[reportPrivateUsage]
-    assert ApiRequester._is_known_failure_status(404)  # pyright: ignore[reportPrivateUsage]
-    assert ApiRequester._is_known_failure_status(503)  # pyright: ignore[reportPrivateUsage]
-    assert not ApiRequester._is_known_failure_status(201)  # pyright: ignore[reportPrivateUsage]
+def test_http_request_short_circuits_when_force_flag_is_set() -> None:
+    """A pre-set force-failure flag should skip the network call and fail locally."""
+
+    async def run() -> None:
+        response_200 = _FakeHttpResponse(
+            status_code=200,
+            reason_phrase="OK",
+            url="https://example.invalid/data",
+            text='{"ok": true}',
+            headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+            content=b'{"ok": true}',
+            elapsed=timedelta(milliseconds=8),
+        )
+        requester, _ = _build_requester(responses=[response_200])
+        requester._force_failure = True  # pyright: ignore[reportPrivateUsage]
+
+        result = await requester._http_request(  # pyright: ignore[reportPrivateUsage]
+            UnprocessedRequest(request=_build_request()),
+            allow_pagination=False,
+        )
+
+        assert isinstance(result, FailNoResponse)
+        assert "ForcedFailureError" in result.error_message
+        assert len(requester._client.calls) == 0  # pyright: ignore[reportPrivateUsage]
+
+    asyncio.run(run())
+
+
+def test_process_requests_maps_forced_failure_to_fail_no_response() -> None:
+    """A configured forced-failure status should map to FailNoResponse in batch output."""
+
+    async def run() -> None:
+        response_503 = _FakeHttpResponse(
+            status_code=503,
+            reason_phrase="Service Unavailable",
+            url="https://example.invalid/data",
+            text='{"error": "busy"}',
+            headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+            content=b'{"error": "busy"}',
+            elapsed=timedelta(milliseconds=8),
+        )
+        requester, _ = _build_requester(responses=[response_503], force_fail_on={503})
+        request = _build_request()
+
+        results = await requester.process_requests({request.request_key: request})
+
+        assert request.request_key in results.failed
+        failed = results.failed[request.request_key]
+        assert failed.metadata is None
+        assert failed.json is None
+        assert any("ForcedFailureError" in message for message in failed.error_messages)
+
+    asyncio.run(run())
+
+
+def test_process_requests_resets_force_failure_between_batches() -> None:
+    """Each process_requests call should clear prior force-failure state."""
+
+    async def run() -> None:
+        response_503 = _FakeHttpResponse(
+            status_code=503,
+            reason_phrase="Service Unavailable",
+            url="https://example.invalid/data",
+            text='{"error": "busy"}',
+            headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+            content=b'{"error": "busy"}',
+            elapsed=timedelta(milliseconds=8),
+        )
+        response_200 = _FakeHttpResponse(
+            status_code=200,
+            reason_phrase="OK",
+            url="https://example.invalid/data",
+            text='{"ok": true}',
+            headers={"Date": "Mon, 06 Jul 2026 18:00:00 GMT"},
+            content=b'{"ok": true}',
+            elapsed=timedelta(milliseconds=8),
+        )
+
+        requester, _ = _build_requester(
+            responses=[response_503, response_200],
+            force_fail_on={503},
+        )
+        first_request = _build_request()
+        second_request = _build_request()
+
+        first_results = await requester.process_requests({
+            first_request.request_key: first_request
+        })
+        assert first_request.request_key in first_results.failed
+
+        second_results = await requester.process_requests({
+            second_request.request_key: second_request
+        })
+        assert second_request.request_key in second_results.successful
+        assert not second_results.failed
+
+    asyncio.run(run())
 
 
 def test_http_request_uses_fail_with_response_for_503() -> None:
