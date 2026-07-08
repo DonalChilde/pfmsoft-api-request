@@ -1,4 +1,8 @@
-"""Helpers for building SQLite URIs, opening connections, and bootstrapping schema."""
+"""SQLite connection and schema bootstrap helpers.
+
+These helpers centralize URI construction and consistent connection setup for
+cache backends and tests.
+"""
 
 import logging
 import sqlite3
@@ -26,7 +30,7 @@ def read_only_uri(db_path: str) -> str:
 
 
 def read_write_uri(db_path: str) -> str:
-    """Build a read-write/create SQLite URI for use with sqlite3.connect(uri=True).
+    """Build a read-write/create SQLite URI for sqlite3.connect(uri=True).
 
     Args:
         db_path: Filesystem path to the SQLite database.
@@ -50,8 +54,7 @@ def create_read_only_connection(db_path: str | Path) -> sqlite3.Connection:
 
     Notes:
         The target database is expected to already contain the required schema.
-        Read-only connections cannot create temporary tables. Query helpers that
-        rely on temporary tables for large key filters may fail in this mode.
+        Read-only connections cannot modify schema or persisted rows.
     """
     if isinstance(db_path, Path):
         db_path = str(db_path.resolve())
@@ -100,7 +103,7 @@ def db_connection_manager(
     """Yield a SQLite connection and close it automatically on exit.
 
     Delegates to the read-only or read-write connection factory based on the
-    read_only flag.
+    `read_only` flag.
 
     Args:
         db_path: Path to the SQLite database file.

@@ -1,4 +1,8 @@
-"""A sqlite3 based cache provider with factory function for use with ApiRequester."""
+"""SQLite-backed cache provider for request orchestration.
+
+This module provides a `CacheProtocol` implementation backed by a `WebCache`
+table and a small factory for dependency injection.
+"""
 
 import sqlite3
 from pathlib import Path
@@ -48,7 +52,7 @@ class SqliteCache(CacheProtocol):
             self._connection_path = Path(db)
 
     async def __aenter__(self) -> Self:
-        """Enter the asynchronous context manager."""
+        """Enter context and open path-owned connections when needed."""
         if self._connection_path is not None:
             self._connection = create_read_write_connection(self._connection_path)
             self._close_connection_on_exit = True
@@ -60,13 +64,13 @@ class SqliteCache(CacheProtocol):
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Exit the asynchronous context manager."""
+        """Exit context and close only connections owned by this instance."""
         _ = exc_type, exc_value, traceback
         if self._close_connection_on_exit:
             self._connection.close()
 
     async def get(self, cache_key: UUID) -> CachedResponse | None:
-        """Get a cached response by cache key."""
+        """Get a cached response by key, or None when missing."""
         return query_helpers.query_cached_response(self._connection, str(cache_key))
 
     @staticmethod
@@ -97,7 +101,11 @@ class SqliteCache(CacheProtocol):
     async def set(
         self, cache_key: UUID, text: str, metadata: ResponseMetadata
     ) -> CachedResponse:
-        """Set or replace a cached response in the cache."""
+        """Create or replace a cached response entry.
+
+        Raises:
+            ValueError: If both metadata validators are absent.
+        """
         cached_response = self._build_cached_response(
             cache_key=cache_key,
             text=text,
@@ -113,7 +121,12 @@ class SqliteCache(CacheProtocol):
     async def update_304(
         self, cache_key: UUID, metadata: ResponseMetadata
     ) -> CachedResponse:
-        """Update cached metadata after a 304 response while preserving body text."""
+        """Refresh a stale entry from 304 metadata while preserving body text.
+
+        Raises:
+            KeyError: If no existing entry is present.
+            ValueError: If merged metadata lacks both validators.
+        """
         existing = await self.get(cache_key)
         if existing is None:
             raise KeyError(f"No cached response found for key {cache_key}")
@@ -139,7 +152,10 @@ class SqliteCache(CacheProtocol):
         return cached_response
 
     async def delete(self, cache_key: UUID) -> None:
-        """Delete a cached response from the cache."""
+        """Delete a cached response from the cache.
+
+        This operation is idempotent and does not raise for missing keys.
+        """
         query_helpers.delete_cached_response(self._connection, str(cache_key))
 
     async def clear(
@@ -151,6 +167,9 @@ class SqliteCache(CacheProtocol):
             only_expired: When true, remove only expired entries.
             age_limit: When provided, remove entries with `cache_age` greater
                 than or equal to this nanosecond threshold.
+
+        Notes:
+            When both filters are provided, entries must satisfy both.
         """
         if not only_expired and age_limit is None:
             with self._connection:
@@ -175,7 +194,7 @@ class SqliteCache(CacheProtocol):
             self._connection.execute(query, tuple(params))
 
     async def flush(self) -> None:
-        """Flush pending writes to disk."""
+        """Commit pending writes on the active SQLite connection."""
         self._connection.commit()
 
     async def cache_info(self) -> CacheInfo:
@@ -195,5 +214,5 @@ class SqliteCacheFactory(CacheFactoryProtocol):
         self._db_path = db_path
 
     def __call__(self) -> CacheProtocol:
-        """Create a new SQLite-backed cache instance."""
+        """Create and return a new SQLite-backed cache instance."""
         return SqliteCache(self._db_path)

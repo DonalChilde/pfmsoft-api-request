@@ -2,6 +2,12 @@
 
 These caches are primarily intended for tests and local development where a
 persistent backing store is unnecessary.
+
+Behavior summary:
+    - Storage is process-local and non-durable.
+    - `set` performs upsert semantics.
+    - `update_304` preserves cached body text and merges metadata.
+    - `flush` is a no-op.
 """
 
 from types import TracebackType
@@ -40,7 +46,7 @@ class InMemoryCache(CacheProtocol):
         _ = exc_type, exc_value, traceback
 
     async def get(self, cache_key: UUID) -> CachedResponse | None:
-        """Get a cached response by cache key."""
+        """Get a cached response by key, or None when missing."""
         return self._entries.get(cache_key)
 
     @staticmethod
@@ -71,7 +77,11 @@ class InMemoryCache(CacheProtocol):
     async def set(
         self, cache_key: UUID, text: str, metadata: ResponseMetadata
     ) -> CachedResponse:
-        """Set or replace a cached response in the cache."""
+        """Create or replace a cached response entry.
+
+        Raises:
+            ValueError: If both metadata validators are absent.
+        """
         cached_response = self._build_cached_response(
             cache_key=cache_key,
             text=text,
@@ -83,7 +93,12 @@ class InMemoryCache(CacheProtocol):
     async def update_304(
         self, cache_key: UUID, metadata: ResponseMetadata
     ) -> CachedResponse:
-        """Update cached metadata after a 304 response while preserving body text."""
+        """Refresh a stale entry from 304 metadata while preserving body text.
+
+        Raises:
+            KeyError: If no existing entry is present.
+            ValueError: If merged metadata lacks both validators.
+        """
         existing = self._entries.get(cache_key)
         if existing is None:
             raise KeyError(f"No cached response found for key {cache_key}")
@@ -105,7 +120,10 @@ class InMemoryCache(CacheProtocol):
         return cached_response
 
     async def delete(self, cache_key: UUID) -> None:
-        """Delete a cached response from the cache."""
+        """Delete a cached response from the cache.
+
+        This operation is idempotent and does not raise for missing keys.
+        """
         self._entries.pop(cache_key, None)
 
     async def clear(
@@ -117,6 +135,9 @@ class InMemoryCache(CacheProtocol):
             only_expired: When true, remove only expired entries.
             age_limit: When provided, remove entries with `cache_age` greater
                 than or equal to this nanosecond threshold.
+
+        Notes:
+            When both filters are provided, entries must satisfy both.
         """
         if not only_expired and age_limit is None:
             self._entries.clear()
@@ -152,5 +173,5 @@ class InMemoryCacheFactory(CacheFactoryProtocol):
     """
 
     def __call__(self) -> CacheProtocol:
-        """Create a new InMemoryCache instance."""
+        """Create and return a new in-memory cache instance."""
         return InMemoryCache()

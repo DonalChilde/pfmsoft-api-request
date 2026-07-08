@@ -1,7 +1,7 @@
-"""SQLite persistence helpers for api-request Sqlite Cache.
+"""SQLite persistence helpers for the cache backend.
 
 This module contains SQL-backed helpers for storing and retrieving
-CachedResponse and CacheInfo objects.
+`CachedResponse` rows in the `WebCache` table.
 """
 
 import logging
@@ -16,7 +16,13 @@ logger = logging.getLogger(__name__)
 def write_cached_response(
     connection: sqlite3.Connection, cache_key: str, cached_response: CachedResponse
 ) -> None:
-    """Write or update a cached response in the SQLite database."""
+    """Insert or replace a cached response row by key.
+
+    Args:
+        connection: Active SQLite connection.
+        cache_key: Cache key string (UUID text representation).
+        cached_response: Normalized cache model to persist.
+    """
     query = """
         INSERT INTO WebCache (
             cache_key,
@@ -54,7 +60,15 @@ def write_cached_response(
 def query_cached_response(
     connection: sqlite3.Connection, cache_key: str
 ) -> CachedResponse | None:
-    """Query a cached response from the SQLite database."""
+    """Query one cached response row by key.
+
+    Args:
+        connection: Active SQLite connection.
+        cache_key: Cache key string (UUID text representation).
+
+    Returns:
+        Matching cached response, or None when no row exists.
+    """
     query = """
         SELECT
             cache_key,
@@ -84,7 +98,10 @@ def query_cached_response(
 
 
 def delete_cached_response(connection: sqlite3.Connection, cache_key: str) -> None:
-    """Delete a cached response from the SQLite database."""
+    """Delete a cached response row by key.
+
+    This operation is idempotent and does not raise for missing keys.
+    """
     query = "DELETE FROM WebCache WHERE cache_key = ?"
     with connection:
         connection.execute(query, (cache_key,))
