@@ -5,10 +5,10 @@ from typing import cast
 
 from typer import Context
 
-from api_request.settings import ApiRequestSettings
+from api_request.settings import SETTINGS_KEY, ApiRequestSettings
 
 
-def get_auth_manager_settings_from_context(ctx: Context) -> ApiRequestSettings:
+def get_api_request_settings_from_context(ctx: Context) -> ApiRequestSettings:
     """Return ApiRequestSettings stored in the Typer context.
 
     Args:
@@ -16,14 +16,14 @@ def get_auth_manager_settings_from_context(ctx: Context) -> ApiRequestSettings:
             initialized ApiRequestSettings.
 
     Returns:
-        ApiRequestSettings stored under the `api-request-settings` key.
+        ApiRequestSettings stored under the `settings.SETTINGS_KEY` key.
 
     Raises:
         ValueError: If the context does not contain initialized ApiRequestSettings.
     """
-    if ctx.obj is None or "api-request-settings" not in ctx.obj:
+    if ctx.obj is None or SETTINGS_KEY not in ctx.obj:
         raise ValueError("ApiRequestSettings not found in context.")
-    return cast(ApiRequestSettings, ctx.obj["api-request-settings"])
+    return cast(ApiRequestSettings, ctx.obj[SETTINGS_KEY])
 
 
 def get_stdin() -> str:

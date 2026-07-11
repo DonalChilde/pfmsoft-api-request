@@ -11,10 +11,10 @@ from dataclasses import asdict
 import typer
 
 from api_request import __app_name__, __version__
+from api_request.cli import app as api_request_app
+from api_request.cli.helpers import get_api_request_settings_from_context
 from api_request.logging_config import setup_logging
-from api_request.settings import get_settings
-
-from .request import app as request_app
+from api_request.settings import SETTINGS_KEY, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +32,21 @@ def default_options(ctx: typer.Context) -> None:
     """
     settings = get_settings()
     setup_logging(log_dir=settings.logging_directory)
-    ctx.obj = {"api-request-settings": settings}
+    ctx.obj = {SETTINGS_KEY: settings}
     logger.info(
         f"Starting {__app_name__} v{__version__} with settings: {asdict(settings)!r}"
     )
 
 
-app = typer.Typer(
-    name="api-request",
-    help="A command-line tool for managing API requests.",
-    callback=default_options,
-    no_args_is_help=True,
-)
+app = typer.Typer(callback=default_options, no_args_is_help=True)
 
-app.add_typer(request_app)
+
+@app.command()
+def version(ctx: typer.Context) -> None:
+    """Print the version of the api-request CLI."""
+    settings = get_api_request_settings_from_context(ctx)
+    typer.echo(f"{__app_name__} v{__version__}")
+    typer.echo(f"Settings: {asdict(settings)!r}")
+
+
+app.add_typer(api_request_app)

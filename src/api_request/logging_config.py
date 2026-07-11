@@ -1,4 +1,4 @@
-"""Logging configuration helpers for api-request.
+"""Logging configuration helpers for Eve Auth Manager.
 
 Provides the default dictConfig-based logging setup used by the application,
 including console output and rotating file handlers.
@@ -33,6 +33,13 @@ def setup_logging(log_dir: Path) -> None:
         file, and CRITICAL-and-above messages to the console handler.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
+
+    # dictConfig replaces root handlers; keep deferred buffers so they can be
+    # flushed after real handlers are installed.
+    root_logger = logging.getLogger()
+    deferred_handlers = [
+        h for h in root_logger.handlers if isinstance(h, DeferredHandler)
+    ]
 
     log_config: dict[str, Any] = {
         "version": 1,
@@ -116,3 +123,80 @@ def setup_logging(log_dir: Path) -> None:
         },
     }
     logging.config.dictConfig(log_config)
+
+    for deferred in deferred_handlers:
+        if deferred not in root_logger.handlers:
+            root_logger.addHandler(deferred)
+
+
+class DeferredHandler(logging.Handler):
+    """Buffers log records until real handlers are ready, then replays them."""
+
+    def __init__(self, level: int = logging.NOTSET) -> None:
+        """Initialize an in-memory record buffer."""
+        super().__init__(level)
+        self.buffer: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Store records until configured handlers are available."""
+        self.buffer.append(record)
+
+    def flush_to(self, handlers: list[logging.Handler]) -> None:
+        """Replay buffered records through the given handlers, then clear."""
+        for record in self.buffer:
+            for handler in handlers:
+                if record.levelno >= handler.level:
+                    handler.handle(record)
+        self.buffer.clear()
+
+
+def init_deferred_handler() -> None:
+    """Initialize a deferred handler for logging.
+
+    This funtion sets up a deferred handler that can be used to buffer log messages in
+    memory before they are flushed to the appropriate handlers.
+
+    This is useful for capturing log messages emitted before the logging configuration
+    is fully set up. The deferred handler will buffer these messages in memory and can
+    be flushed to the appropriate handlers once they are configured.
+
+    DeferredHandler is added to the root logger, and it captures all log messages at
+    DEBUG level and above.
+
+    It must be flushed to the appropriate handlers once they are configured to log the
+    buffered messages.
+    """
+    root_logger = logging.getLogger()
+    if any(isinstance(h, DeferredHandler) for h in root_logger.handlers):
+        return
+    root_logger.setLevel(logging.DEBUG)  # capture everything; filter at handler level
+    deferred = DeferredHandler()
+    root_logger.addHandler(deferred)
+
+
+def flush_deferred_handler() -> None:
+    """Replay buffered records into whatever handlers are currently configured.
+
+    Call this after your real logging setup (dictConfig, basicConfig, manual
+    addHandler calls, etc.) has run. Finds any DeferredHandler on the root
+    logger, replays its buffer into all *other* handlers currently attached,
+    then removes itself.
+
+    Safe to call multiple times or when no DeferredHandler is present — it's
+    a no-op in that case rather than an error.
+    """
+    root_logger = logging.getLogger()
+
+    deferred_handlers = [
+        h for h in root_logger.handlers if isinstance(h, DeferredHandler)
+    ]
+    if not deferred_handlers:
+        return  # nothing to flush, or already finalized
+
+    real_handlers = [
+        h for h in root_logger.handlers if not isinstance(h, DeferredHandler)
+    ]
+
+    for deferred in deferred_handlers:
+        deferred.flush_to(real_handlers)
+        root_logger.removeHandler(deferred)

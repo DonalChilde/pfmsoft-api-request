@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from api_request.cli.helpers import (
-    get_auth_manager_settings_from_context,
+    get_api_request_settings_from_context,
     get_stdin,
 )
 from api_request.settings import ApiRequestSettings
@@ -32,7 +32,7 @@ def test_get_auth_manager_settings_from_context_returns_settings() -> None:
     expected = ApiRequestSettings(application_directory=Path("/tmp/api-request"))
     ctx = SimpleNamespace(obj={"api-request-settings": expected})
 
-    assert get_auth_manager_settings_from_context(ctx) is expected
+    assert get_api_request_settings_from_context(ctx) is expected
 
 
 @pytest.mark.parametrize(
@@ -49,7 +49,7 @@ def test_get_auth_manager_settings_from_context_raises_for_missing_settings(
     ctx = SimpleNamespace(obj=ctx_obj)
 
     with pytest.raises(ValueError, match="ApiRequestSettings not found"):
-        get_auth_manager_settings_from_context(ctx)
+        get_api_request_settings_from_context(ctx)
 
 
 def test_get_stdin_reads_from_non_tty(monkeypatch: pytest.MonkeyPatch) -> None:

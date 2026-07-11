@@ -1,7 +1,5 @@
 # Project specific ignores
-/dev/secrets
-/dev/tmp
-/dev/pytest-logs
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

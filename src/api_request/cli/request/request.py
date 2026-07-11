@@ -12,13 +12,11 @@ from rich.json import JSON
 
 from api_request import ApiRequester, __app_name__, __version__
 from api_request.cache import SqliteCacheFactory
+from api_request.cli.helpers import get_api_request_settings_from_context, get_stdin
 from api_request.helpers.save_text_file import save_text_file
 from api_request.logging_config import setup_logging
 from api_request.rate_limit.aio_limiter import AiolimiterRateLimiterFactory
 from api_request.request.models import Requests, RequestsRoot, Responses, ResponsesRoot
-from api_request.settings import get_settings
-
-from .helpers import get_stdin
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +26,7 @@ app = typer.Typer(
 )
 
 
-@app.command("api-request", help="Make an API request.")
+@app.command(help="Make an API request.")
 def request(
     ctx: Annotated[typer.Context, typer.Option(hidden=True)],
     file_in: Annotated[
@@ -113,14 +111,6 @@ def request(
             help="Suppress non-essential CLI messages.",
         ),
     ] = False,
-    version: Annotated[
-        bool,
-        typer.Option(
-            "--version",
-            help="Show CLI version and resolved runtime directories.",
-            is_eager=True,
-        ),
-    ] = False,
 ):
     """Execute a batch of API requests from JSON input.
 
@@ -162,20 +152,14 @@ def request(
         messenger = Console(stderr=True, quiet=True)
     else:
         messenger = Console(stderr=True)
-    settings = get_settings()
+    settings = get_api_request_settings_from_context(ctx)
     if app_dir:
         settings.application_directory = app_dir
     setup_logging(log_dir=settings.logging_directory)
     logger.info(
         f"Starting {__app_name__} v{__version__} with settings: {asdict(settings)!r}"
     )
-    if version:
-        typer.echo(f"{__app_name__} v{__version__}")
-        typer.echo(f"Application directory: {settings.application_directory}")
-        typer.echo(f"Cache directory: {settings.cache_directory}")
-        typer.echo(f"Cache file: {settings.cache_file}")
-        typer.echo(f"Logging directory: {settings.logging_directory}")
-        raise typer.Exit()
+
     input_data = get_stdin() if file_in == Path("-") else file_in.read_text()
     requests = RequestsRoot.model_validate_json(input_data).root
     if not requests:
@@ -190,7 +174,7 @@ def request(
     async def run_requests(
         requests_to_run: Requests, force_fail_codes: set[int]
     ) -> Responses:
-        cache_factory = SqliteCacheFactory(settings.cache_file)
+        cache_factory = SqliteCacheFactory(settings.web_cache_path)
         rate_limiter_factory = AiolimiterRateLimiterFactory(
             max_rate=max_rate, time_period=time_period
         )
