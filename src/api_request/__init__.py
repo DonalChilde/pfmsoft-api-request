@@ -11,7 +11,7 @@ and other paths."""
 # https://github.com/astral-sh/uv/issues/11718                                        #
 #######################################################################################
 __description__ = "A command line first interface to the Eve Online API"
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __release__ = __version__
 #######################################################################################=
 __url__ = "https://github.com/DonalChilde/api-request"
