@@ -12,7 +12,7 @@ from api_request.cli.helpers import (
     get_api_request_settings_from_context,
     get_stdin,
 )
-from api_request.settings import ApiRequestSettings
+from api_request.settings import SETTINGS_KEY, ApiRequestSettings
 
 
 class _FakeStdin:
@@ -29,8 +29,12 @@ class _FakeStdin:
 
 def test_get_auth_manager_settings_from_context_returns_settings() -> None:
     """Context helper should return settings when the key exists."""
-    expected = ApiRequestSettings(application_directory=Path("/tmp/api-request"))
-    ctx = SimpleNamespace(obj={"api-request-settings": expected})
+    expected = ApiRequestSettings(
+        application_directory=Path("/tmp/api-request"),
+        logging_directory=Path("/tmp/api-request/logs"),
+        web_cache_path=Path("/tmp/api-request/api_requests_web_cache.sqlite"),
+    )
+    ctx = SimpleNamespace(obj={SETTINGS_KEY: expected})
 
     assert get_api_request_settings_from_context(ctx) is expected
 

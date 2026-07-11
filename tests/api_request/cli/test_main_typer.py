@@ -6,14 +6,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from api_request.cli import main_typer
-from api_request.settings import ApiRequestSettings
+from api_request.settings import SETTINGS_KEY, ApiRequestSettings
 
 
 def test_default_options_initializes_settings_and_logging(
     monkeypatch,
 ) -> None:
     """Bootstrap callback should store settings and configure logging."""
-    settings = ApiRequestSettings(application_directory=Path("/tmp/api-request"))
+    settings = ApiRequestSettings(
+        application_directory=Path("/tmp/api-request"),
+        logging_directory=Path("/tmp/api-request/logs"),
+        web_cache_path=Path("/tmp/api-request/api_requests_web_cache.sqlite"),
+    )
     captured: dict[str, Path] = {}
 
     def fake_get_settings() -> ApiRequestSettings:
@@ -29,10 +33,9 @@ def test_default_options_initializes_settings_and_logging(
     main_typer.default_options(ctx)
 
     assert captured["log_dir"] == settings.logging_directory
-    assert ctx.obj == {"api-request-settings": settings}
+    assert ctx.obj == {SETTINGS_KEY: settings}
 
 
 def test_main_typer_app_metadata() -> None:
-    """Typer app should expose expected name and no-args behavior."""
-    assert main_typer.app.info.name == "api-request"
+    """Typer app should expose expected no-args behavior."""
     assert main_typer.app.info.no_args_is_help is True

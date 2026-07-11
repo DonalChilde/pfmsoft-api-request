@@ -11,7 +11,7 @@ from uuid import UUID
 import pytest
 import typer
 
-from api_request.cli import request as request_cli
+from api_request.cli.request import request as request_cmd
 from api_request.request.models import (
     Request,
     Response,
@@ -19,7 +19,7 @@ from api_request.request.models import (
     Responses,
     Source,
 )
-from api_request.settings import ApiRequestSettings
+from api_request.settings import SETTINGS_KEY, ApiRequestSettings
 
 
 @dataclass(slots=True)
@@ -85,34 +85,15 @@ def _requests_json() -> str:
     )
 
 
-def test_request_cli_exits_after_printing_version(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Version mode should print runtime paths and exit before reading input."""
-    settings = ApiRequestSettings(application_directory=Path("/tmp/api-request"))
-    echoed: list[str] = []
-
-    monkeypatch.setattr(request_cli, "get_settings", lambda: settings)
-    monkeypatch.setattr(request_cli, "setup_logging", lambda *, log_dir: None)
-    monkeypatch.setattr(request_cli.typer, "echo", lambda text: echoed.append(text))
-
-    with pytest.raises(typer.Exit):
-        request_cli.request(
-            SimpleNamespace(),
-            version=True,
-        )
-
-    assert echoed[0].startswith("api-request v")
-    assert any("Application directory:" in line for line in echoed)
-    assert any("Cache file:" in line for line in echoed)
-    assert any("Logging directory:" in line for line in echoed)
-
-
 def test_request_cli_exits_for_empty_request_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Empty request input should fail with exit code 1 and message."""
-    settings = ApiRequestSettings(application_directory=Path("/tmp/api-request"))
+    settings = ApiRequestSettings(
+        application_directory=Path("/tmp/api-request"),
+        logging_directory=Path("/tmp/api-request/logs"),
+        web_cache_path=Path("/tmp/api-request/api_requests_web_cache.sqlite"),
+    )
     consoles: list[_FakeConsole] = []
 
     def fake_console(*, stderr: bool, quiet: bool = False) -> _FakeConsole:
@@ -120,13 +101,16 @@ def test_request_cli_exits_for_empty_request_map(
         consoles.append(console)
         return console
 
-    monkeypatch.setattr(request_cli, "get_settings", lambda: settings)
-    monkeypatch.setattr(request_cli, "setup_logging", lambda *, log_dir: None)
-    monkeypatch.setattr(request_cli, "get_stdin", lambda: "{}")
-    monkeypatch.setattr(request_cli, "Console", fake_console)
+    monkeypatch.setattr(request_cmd, "setup_logging", lambda *, log_dir: None)
+    monkeypatch.setattr(request_cmd, "get_stdin", lambda: "{}")
+    monkeypatch.setattr(request_cmd, "Console", fake_console)
 
     with pytest.raises(typer.Exit) as exc:
-        request_cli.request(SimpleNamespace(), file_in=Path("-"), quiet=True)
+        request_cmd.request(
+            SimpleNamespace(obj={SETTINGS_KEY: settings}),
+            file_in=Path("-"),
+            quiet=True,
+        )
 
     assert exc.value.exit_code == 1
     assert consoles[0].quiet is True
@@ -137,19 +121,22 @@ def test_request_cli_writes_plain_json_to_stdout(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     """When output is stdout and --plain is set, command should print plain JSON."""
-    settings = ApiRequestSettings(application_directory=Path("/tmp/api-request"))
+    settings = ApiRequestSettings(
+        application_directory=Path("/tmp/api-request"),
+        logging_directory=Path("/tmp/api-request/logs"),
+        web_cache_path=Path("/tmp/api-request/api_requests_web_cache.sqlite"),
+    )
 
-    monkeypatch.setattr(request_cli, "get_settings", lambda: settings)
-    monkeypatch.setattr(request_cli, "setup_logging", lambda *, log_dir: None)
-    monkeypatch.setattr(request_cli, "get_stdin", _requests_json)
-    monkeypatch.setattr(request_cli, "SqliteCacheFactory", lambda cache_file: object())
+    monkeypatch.setattr(request_cmd, "setup_logging", lambda *, log_dir: None)
+    monkeypatch.setattr(request_cmd, "get_stdin", _requests_json)
+    monkeypatch.setattr(request_cmd, "SqliteCacheFactory", lambda cache_file: object())
     monkeypatch.setattr(
-        request_cli,
+        request_cmd,
         "AiolimiterRateLimiterFactory",
         lambda *, max_rate, time_period: object(),
     )
     monkeypatch.setattr(
-        request_cli,
+        request_cmd,
         "Console",
         lambda *, stderr, quiet=False: _FakeConsole(stderr=stderr, quiet=quiet),
     )
@@ -160,10 +147,10 @@ def test_request_cli_writes_plain_json_to_stdout(
         ) -> Responses:
             return _build_successful_responses(requests_to_run)
 
-    monkeypatch.setattr(request_cli, "ApiRequester", _ConfiguredFakeApiRequester)
+    monkeypatch.setattr(request_cmd, "ApiRequester", _ConfiguredFakeApiRequester)
 
-    request_cli.request(
-        SimpleNamespace(),
+    request_cmd.request(
+        SimpleNamespace(obj={SETTINGS_KEY: settings}),
         file_in=Path("-"),
         file_out=Path("-"),
         plain=True,
@@ -182,7 +169,11 @@ def test_request_cli_writes_file_and_reports_path(
     tmp_path: Path,
 ) -> None:
     """When output is a file path, command should save JSON and report destination."""
-    settings = ApiRequestSettings(application_directory=Path("/tmp/api-request"))
+    settings = ApiRequestSettings(
+        application_directory=Path("/tmp/api-request"),
+        logging_directory=Path("/tmp/api-request/logs"),
+        web_cache_path=Path("/tmp/api-request/api_requests_web_cache.sqlite"),
+    )
     output_file = tmp_path / "responses.json"
     consoles: list[_FakeConsole] = []
     save_call: dict[str, Any] = {}
@@ -205,17 +196,16 @@ def test_request_cli_writes_file_and_reports_path(
         save_call["overwrite"] = overwrite
         return output_directory / file_name
 
-    monkeypatch.setattr(request_cli, "get_settings", lambda: settings)
-    monkeypatch.setattr(request_cli, "setup_logging", lambda *, log_dir: None)
-    monkeypatch.setattr(request_cli, "get_stdin", _requests_json)
-    monkeypatch.setattr(request_cli, "SqliteCacheFactory", lambda cache_file: object())
+    monkeypatch.setattr(request_cmd, "setup_logging", lambda *, log_dir: None)
+    monkeypatch.setattr(request_cmd, "get_stdin", _requests_json)
+    monkeypatch.setattr(request_cmd, "SqliteCacheFactory", lambda cache_file: object())
     monkeypatch.setattr(
-        request_cli,
+        request_cmd,
         "AiolimiterRateLimiterFactory",
         lambda *, max_rate, time_period: object(),
     )
-    monkeypatch.setattr(request_cli, "Console", fake_console)
-    monkeypatch.setattr(request_cli, "save_text_file", fake_save_text_file)
+    monkeypatch.setattr(request_cmd, "Console", fake_console)
+    monkeypatch.setattr(request_cmd, "save_text_file", fake_save_text_file)
 
     class _ConfiguredFakeApiRequester(_FakeApiRequester):
         async def process_requests(
@@ -223,10 +213,10 @@ def test_request_cli_writes_file_and_reports_path(
         ) -> Responses:
             return _build_successful_responses(requests_to_run)
 
-    monkeypatch.setattr(request_cli, "ApiRequester", _ConfiguredFakeApiRequester)
+    monkeypatch.setattr(request_cmd, "ApiRequester", _ConfiguredFakeApiRequester)
 
-    request_cli.request(
-        SimpleNamespace(),
+    request_cmd.request(
+        SimpleNamespace(obj={SETTINGS_KEY: settings}),
         file_in=Path("-"),
         file_out=output_file,
         overwrite=True,
@@ -244,7 +234,11 @@ def test_request_cli_respects_app_dir_and_rich_stdout(
     tmp_path: Path,
 ) -> None:
     """Command should apply app-dir override and print rich JSON to stdout."""
-    settings = ApiRequestSettings(application_directory=Path("/tmp/original"))
+    settings = ApiRequestSettings(
+        application_directory=Path("/tmp/original"),
+        logging_directory=Path("/tmp/original/logs"),
+        web_cache_path=Path("/tmp/original/api_requests_web_cache.sqlite"),
+    )
     consoles: list[_FakeConsole] = []
 
     def fake_console(*, stderr: bool, quiet: bool = False) -> _FakeConsole:
@@ -252,17 +246,16 @@ def test_request_cli_respects_app_dir_and_rich_stdout(
         consoles.append(console)
         return console
 
-    monkeypatch.setattr(request_cli, "get_settings", lambda: settings)
-    monkeypatch.setattr(request_cli, "setup_logging", lambda *, log_dir: None)
-    monkeypatch.setattr(request_cli, "get_stdin", _requests_json)
-    monkeypatch.setattr(request_cli, "SqliteCacheFactory", lambda cache_file: object())
+    monkeypatch.setattr(request_cmd, "setup_logging", lambda *, log_dir: None)
+    monkeypatch.setattr(request_cmd, "get_stdin", _requests_json)
+    monkeypatch.setattr(request_cmd, "SqliteCacheFactory", lambda cache_file: object())
     monkeypatch.setattr(
-        request_cli,
+        request_cmd,
         "AiolimiterRateLimiterFactory",
         lambda *, max_rate, time_period: object(),
     )
-    monkeypatch.setattr(request_cli, "Console", fake_console)
-    monkeypatch.setattr(request_cli, "JSON", lambda payload: {"json": payload})
+    monkeypatch.setattr(request_cmd, "Console", fake_console)
+    monkeypatch.setattr(request_cmd, "JSON", lambda payload: {"json": payload})
 
     class _ConfiguredFakeApiRequester(_FakeApiRequester):
         async def process_requests(
@@ -270,10 +263,10 @@ def test_request_cli_respects_app_dir_and_rich_stdout(
         ) -> Responses:
             return _build_successful_responses(requests_to_run)
 
-    monkeypatch.setattr(request_cli, "ApiRequester", _ConfiguredFakeApiRequester)
+    monkeypatch.setattr(request_cmd, "ApiRequester", _ConfiguredFakeApiRequester)
 
-    request_cli.request(
-        SimpleNamespace(),
+    request_cmd.request(
+        SimpleNamespace(obj={SETTINGS_KEY: settings}),
         file_in=Path("-"),
         file_out=Path("-"),
         plain=False,

@@ -48,7 +48,7 @@ def get_settings() -> ApiRequestSettings:
     logger.info(f"Environment variable prefix: {ENV_PREFIX}")
     pydantic_settings = ApiRequestSettingsPydantic()
     logger.info(
-        f"Loaded settings from environment variables: {asdict(pydantic_settings)}"
+        f"Loaded settings from environment variables: {pydantic_settings.model_dump()}"
     )
     application_directory = pydantic_settings.application_directory.resolve()
     if not application_directory.exists():
