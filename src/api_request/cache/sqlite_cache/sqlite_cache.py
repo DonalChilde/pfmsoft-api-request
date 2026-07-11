@@ -68,12 +68,20 @@ class SqliteCache(CacheProtocol):
     ) -> None:
         """Exit context and close only connections owned by this instance."""
         _ = exc_type, exc_value, traceback
-        if self._close_connection_on_exit:
-            self._connection.close()
+        if self._connection is not None:
+            if self._close_connection_on_exit:
+                self._connection.close()
+
+    def _ensure_connection(self) -> sqlite3.Connection:
+        """Ensure an active SQLite connection is present."""
+        if self._connection is None:
+            raise RuntimeError("No active SQLite connection")
+        return self._connection
 
     async def get(self, cache_key: UUID) -> CachedResponse | None:
         """Get a cached response by key, or None when missing."""
-        return query_helpers.query_cached_response(self._connection, str(cache_key))
+        connection = self._ensure_connection()
+        return query_helpers.query_cached_response(connection, str(cache_key))
 
     @staticmethod
     def _ensure_validators(metadata: ResponseMetadata) -> None:
@@ -113,8 +121,9 @@ class SqliteCache(CacheProtocol):
             text=text,
             metadata=metadata,
         )
+        connection = self._ensure_connection()
         query_helpers.write_cached_response(
-            self._connection,
+            connection,
             str(cache_key),
             cached_response,
         )
@@ -146,8 +155,9 @@ class SqliteCache(CacheProtocol):
             text=existing.response_text,
             metadata=merged_metadata,
         )
+        connection = self._ensure_connection()
         query_helpers.write_cached_response(
-            self._connection,
+            connection,
             str(cache_key),
             cached_response,
         )
@@ -158,7 +168,8 @@ class SqliteCache(CacheProtocol):
 
         This operation is idempotent and does not raise for missing keys.
         """
-        query_helpers.delete_cached_response(self._connection, str(cache_key))
+        connection = self._ensure_connection()
+        query_helpers.delete_cached_response(connection, str(cache_key))
 
     async def clear(
         self, only_expired: bool = False, age_limit: int | None = None
@@ -173,9 +184,10 @@ class SqliteCache(CacheProtocol):
         Notes:
             When both filters are provided, entries must satisfy both.
         """
+        connection = self._ensure_connection()
         if not only_expired and age_limit is None:
-            with self._connection:
-                self._connection.execute("DELETE FROM WebCache")
+            with connection:
+                connection.execute("DELETE FROM WebCache")
             return
 
         clauses: list[str] = []
@@ -192,18 +204,19 @@ class SqliteCache(CacheProtocol):
 
         where_clause = " AND ".join(clauses)
         query = f"DELETE FROM WebCache WHERE {where_clause}"
-        with self._connection:
-            self._connection.execute(query, tuple(params))
+        connection = self._ensure_connection()
+        with connection:
+            connection.execute(query, tuple(params))
 
     async def flush(self) -> None:
         """Commit pending writes on the active SQLite connection."""
-        self._connection.commit()
+        # hot cache not yet implememnted
+        pass
 
     async def cache_info(self) -> CacheInfo:
         """Get summary information about the cache."""
-        row = self._connection.execute(
-            "SELECT COUNT(*) AS size FROM WebCache"
-        ).fetchone()
+        connection = self._ensure_connection()
+        row = connection.execute("SELECT COUNT(*) AS size FROM WebCache").fetchone()
         size = 0 if row is None else int(row["size"])
         return CacheInfo(size=size)
 
