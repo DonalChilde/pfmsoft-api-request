@@ -18,6 +18,23 @@ __url__ = "https://github.com/DonalChilde/api-request"
 __license__ = "MIT"
 
 from .request.api_requester import ApiRequester
-from .request.models import Request, Response, ResponseMetadata, Source
+from .request.models import (
+    FailedResponse,
+    Request,
+    Requests,
+    Response,
+    ResponseMetadata,
+    Responses,
+    Source,
+)
 
-__all__ = ["ApiRequester", "Request", "Response", "ResponseMetadata", "Source"]
+__all__ = [
+    "ApiRequester",
+    "FailedResponse",
+    "Request",
+    "Requests",
+    "Response",
+    "ResponseMetadata",
+    "Responses",
+    "Source",
+]
