@@ -18,8 +18,6 @@ APP_NAMESPACE = uuid5(NAMESPACE_DNS, APP_DOMAIN)
 ENV_PREFIX = APP_DOMAIN.replace(".", "_").replace("-", "_").upper() + "_"
 SETTINGS_KEY = ENV_PREFIX + "SETTINGS"
 
-print(f"Environment variable prefix: {ENV_PREFIX}")
-
 
 @dataclass(slots=True, kw_only=True)
 class ApiRequestSettings:
