@@ -79,7 +79,7 @@ class X_ratelimit:
     """Consumed budget in the current window."""
 
 
-@dataclass(slots=True, kw_only=True, frozen=True)
+@dataclass(slots=True, kw_only=True)
 class ResponseMetadata:
     """Represents transport metadata for a single HTTP response.
 
@@ -234,6 +234,19 @@ class ResponseMetadata:
         used = self.headers_lower.get("x-ratelimit-used", "unknown")
         return X_ratelimit(group=group, limit=limit, remaining=remaining, used=used)
 
+    def purge_secrets(self) -> None:
+        """Purge authorization headers from the response metadata for security purposes."""
+        # replace access tokens with REDACTED in headers
+        # check the headers tuple for any authorization headers and redact them
+        redacted_headers = tuple(
+            (k, "REDACTED") if k.lower() == "authorization" else (k, v)
+            for k, v in self.headers
+        )
+        object.__setattr__(self, "headers", redacted_headers)
+        object.__setattr__(
+            self, "headers_lower", {k.lower(): v for k, v in redacted_headers}
+        )
+
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class Response:
@@ -264,6 +277,10 @@ class Response:
         value = RootModel[Response].model_validate_json(json_str).root
         return value
 
+    def purge_secrets(self) -> None:
+        """Purge authorization headers from the response metadata for security purposes."""
+        self.metadata.purge_secrets()
+
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class FailedResponse:
@@ -278,6 +295,11 @@ class FailedResponse:
     """The original request that generated this failed response."""
     error_messages: list[str] = field(default_factory=list[str])
     """An optional list of error messages describing the failure."""
+
+    def purge_secrets(self) -> None:
+        """Purge authorization headers from the response metadata for security purposes."""
+        if self.metadata:
+            self.metadata.purge_secrets()
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
