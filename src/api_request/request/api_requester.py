@@ -328,13 +328,24 @@ class ApiRequester(ApiRequesterProtocol):
     async def process_requests(
         self,
         requests: Requests,
+        purge_secrets: bool = True,
     ) -> Responses:
         """Process a request batch and normalize outcomes into public models.
 
         The input mapping keys are preserved across output `successful` and
         `failed` maps.
 
-        Access tokens are purged from all responses for security purposes before returning.
+        Access tokens are optionally purged from all responses for security purposes
+        before returning.
+
+        Args:
+            requests: Mapping of request ids to `Request` instances.
+            purge_secrets: Whether to purge access tokens from response metadata
+                before returning. Defaults to True.
+
+        Returns:
+            Responses: A mapping of request ids to either `Response` or `FailedResponse`
+                instances.
         """
         self._force_failure = False
         intermediate_responses = await self._dispatch_requests(requests)
@@ -350,7 +361,7 @@ class ApiRequester(ApiRequesterProtocol):
                         request=intermediate.request,
                         source=intermediate.source,
                     )
-                    response.purge_secrets()
+                    self._check_purge_secrets(purge_secrets, response)
                     successful[request_id] = response
 
                 case FailWithResponse():
@@ -362,23 +373,30 @@ class ApiRequester(ApiRequesterProtocol):
                             f"HTTP {intermediate.metadata.status_code} {intermediate.metadata.reason_phrase}"
                         ],
                     )
-                    response.purge_secrets()
+                    self._check_purge_secrets(purge_secrets, response)
                     failed[request_id] = response
                 case FailNoResponse():
                     response = FailedResponse(
                         request=intermediate.request,
                         error_messages=[intermediate.error_message],
                     )
-                    response.purge_secrets()
+                    self._check_purge_secrets(purge_secrets, response)
                     failed[request_id] = response
                 case _:
                     response = FailedResponse(
                         request=requests[request_id],
                         error_messages=["Unknown intermediate response type"],
                     )
-                    response.purge_secrets()
+                    self._check_purge_secrets(purge_secrets, response)
                     failed[request_id] = response
         return Responses(successful=successful, failed=failed)
+
+    def _check_purge_secrets(
+        self, do_purge: bool, response: Response | FailedResponse
+    ) -> None:
+        """Purge access tokens from response metadata for security purposes."""
+        if do_purge:
+            response.purge_secrets()
 
     async def _dispatch_requests(
         self,
