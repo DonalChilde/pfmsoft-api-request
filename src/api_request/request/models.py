@@ -24,7 +24,7 @@ type PARAMETER = str | int | float
 #######################################################################################
 
 
-@dataclass(slots=True, kw_only=True, frozen=True)
+@dataclass(slots=True, kw_only=True)
 class Request:
     """Represents one outbound HTTP request definition.
 
@@ -47,6 +47,15 @@ class Request:
     """The UUID key for the cached response. If None, the response is not cached."""
     rate_key: str | None = None
     """Optional key used by rate-limiter implementations to group requests."""
+
+    def purge_secrets(self) -> None:
+        """Purge authorization headers from the request for security purposes."""
+        # replace access tokens with REDACTED in headers
+        redacted_headers = {
+            k: "REDACTED" if k.lower() == "authorization" else v
+            for k, v in self.headers.items()
+        }
+        self.headers = redacted_headers
 
 
 #######################################################################################
@@ -116,7 +125,11 @@ class ResponseMetadata:
         If duplicate header names differ only by case, the later value wins
         in the lowercase map and a warning is logged.
         """
-        self._headers_lower.update({k.lower(): v for k, v in self.headers})
+        self._init_lowercase_headers()
+
+    def _init_lowercase_headers(self):
+        """Initialize the lowercase headers mapping."""
+        self._headers_lower = {k.lower(): v for k, v in self.headers}
         if len(self.headers) != len(self._headers_lower):
             logger.warning(
                 "Duplicate headers found when converting to lower case. This may lead to "
@@ -125,11 +138,6 @@ class ResponseMetadata:
                 self.headers,
                 self._headers_lower,
             )
-
-    @property
-    def as_string(self) -> str:
-        """Serialize metadata as JSON for cache persistence."""
-        return ResponseMetadataRoot(self).model_dump_json()
 
     @property
     def headers_lower(self) -> dict[str, str]:
@@ -242,10 +250,17 @@ class ResponseMetadata:
             (k, "REDACTED") if k.lower() == "authorization" else (k, v)
             for k, v in self.headers
         )
-        object.__setattr__(self, "headers", redacted_headers)
-        object.__setattr__(
-            self, "headers_lower", {k.lower(): v for k, v in redacted_headers}
-        )
+        self.headers = redacted_headers
+        self._init_lowercase_headers()  # reinitialize lowercase headers after purging
+
+    def serialize(self, indent: int | None = None) -> str:
+        """Serialize the ResponseMetadata object to a JSON string."""
+        return ResponseMetadataRoot(self).model_dump_json(indent=indent)
+
+    @classmethod
+    def deserialize(cls, json_str: str) -> ResponseMetadata:
+        """Deserialize a ResponseMetadata object from a JSON string."""
+        return ResponseMetadataRoot.model_validate_json(json_str).root
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -261,25 +276,23 @@ class Response:
     source: Source
     """The source of the response, for example cache or network."""
 
-    def to_string(self, indent: int) -> str:
-        """Serialize this response as JSON text.
-
-        Args:
-            indent: Indentation level passed to pydantic JSON serializer.
-        """
-        root_model = RootModel[Response](cast(Response, self))
-        json_str = root_model.model_dump_json(indent=indent)
-        return json_str
-
     @classmethod
-    def from_string(cls, json_str: str) -> Response:
+    def deserialize(cls, json_str: str) -> Response:
         """Deserialize a Response from JSON text."""
-        value = RootModel[Response].model_validate_json(json_str).root
+        value = ResponseRoot.model_validate_json(json_str).root
         return value
 
     def purge_secrets(self) -> None:
         """Purge authorization headers from the response metadata for security purposes."""
         self.metadata.purge_secrets()
+        self.request.purge_secrets()
+
+    def serialize(self, indent: int | None = None) -> str:
+        """Serialize the Response object to a JSON string."""
+        return ResponseRoot(self).model_dump_json(indent=indent)
+
+
+ResponseRoot = RootModel[Response]
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -300,6 +313,7 @@ class FailedResponse:
         """Purge authorization headers from the response metadata for security purposes."""
         if self.metadata:
             self.metadata.purge_secrets()
+        self.request.purge_secrets()
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)

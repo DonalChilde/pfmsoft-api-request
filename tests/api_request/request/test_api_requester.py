@@ -82,7 +82,7 @@ class _FakeCache:
         cached_response = CachedResponse(
             cache_key=cache_key,
             response_text=text,
-            response_metadata_json=metadata.as_string,
+            response_metadata_json=metadata.serialize(),
             etag=metadata.etag,
             last_modified=metadata.last_modified,
             expires_at=metadata.expires_at,
@@ -109,7 +109,7 @@ class _FakeCache:
         cached_response = CachedResponse(
             cache_key=cache_key,
             response_text=self._cached_response.response_text,
-            response_metadata_json=merged_metadata.as_string,
+            response_metadata_json=merged_metadata.serialize(),
             etag=merged_metadata.etag,
             last_modified=merged_metadata.last_modified,
             expires_at=merged_metadata.expires_at,
@@ -246,7 +246,7 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text="[1]",
-            response_metadata_json=stale_metadata.as_string,
+            response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             cache_timestamp=Instant.now().timestamp_nanos(),
@@ -310,7 +310,7 @@ def test_cacheable_request_applies_stale_headers_without_mutating_request() -> N
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text="[1]",
-            response_metadata_json=stale_metadata.as_string,
+            response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             cache_timestamp=Instant.now().timestamp_nanos(),
@@ -917,7 +917,7 @@ def test_cacheable_request_returns_failed_refresh_result_directly() -> None:
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text='{"ok": true}',
-            response_metadata_json=stale_metadata.as_string,
+            response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             cache_timestamp=Instant.now().timestamp_nanos(),
@@ -972,7 +972,7 @@ def test_cacheable_request_marks_unexpected_2xx_revalidation_as_failed() -> None
         stale_cached = CachedResponse(
             cache_key=cache_key,
             response_text='{"ok": true}',
-            response_metadata_json=stale_metadata.as_string,
+            response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
             expires_at=Instant.now().timestamp() - 1,
             cache_timestamp=Instant.now().timestamp_nanos(),

@@ -333,6 +333,8 @@ class ApiRequester(ApiRequesterProtocol):
 
         The input mapping keys are preserved across output `successful` and
         `failed` maps.
+
+        Access tokens are purged from all responses for security purposes before returning.
         """
         self._force_failure = False
         intermediate_responses = await self._dispatch_requests(requests)
@@ -342,14 +344,17 @@ class ApiRequester(ApiRequesterProtocol):
         for request_id, intermediate in intermediate_responses.items():
             match intermediate:
                 case SuccessfulResponseBase():
-                    successful[request_id] = Response(
+                    response = Response(
                         metadata=intermediate.metadata,
                         json=intermediate.json,
                         request=intermediate.request,
                         source=intermediate.source,
                     )
+                    response.purge_secrets()
+                    successful[request_id] = response
+
                 case FailWithResponse():
-                    failed[request_id] = FailedResponse(
+                    response = FailedResponse(
                         metadata=intermediate.metadata,
                         json=intermediate.json,
                         request=intermediate.request,
@@ -357,16 +362,22 @@ class ApiRequester(ApiRequesterProtocol):
                             f"HTTP {intermediate.metadata.status_code} {intermediate.metadata.reason_phrase}"
                         ],
                     )
+                    response.purge_secrets()
+                    failed[request_id] = response
                 case FailNoResponse():
-                    failed[request_id] = FailedResponse(
+                    response = FailedResponse(
                         request=intermediate.request,
                         error_messages=[intermediate.error_message],
                     )
+                    response.purge_secrets()
+                    failed[request_id] = response
                 case _:
-                    failed[request_id] = FailedResponse(
+                    response = FailedResponse(
                         request=requests[request_id],
                         error_messages=["Unknown intermediate response type"],
                     )
+                    response.purge_secrets()
+                    failed[request_id] = response
         return Responses(successful=successful, failed=failed)
 
     async def _dispatch_requests(

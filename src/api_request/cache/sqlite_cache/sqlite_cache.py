@@ -12,7 +12,7 @@ from uuid import UUID
 
 from whenever import Instant
 
-from ...request.models import ResponseMetadata, ResponseMetadataRoot
+from ...request.models import ResponseMetadata
 from ..metadata_helpers import merge_cached_revalidation_metadata
 from ..models import CachedResponse, CacheInfo
 from ..protocols import CacheFactoryProtocol, CacheProtocol
@@ -101,7 +101,7 @@ class SqliteCache(CacheProtocol):
         return CachedResponse(
             cache_key=cache_key,
             response_text=text,
-            response_metadata_json=metadata.as_string,
+            response_metadata_json=metadata.serialize(),
             etag=metadata.etag,
             last_modified=metadata.last_modified,
             expires_at=metadata.expires_at,
@@ -142,9 +142,9 @@ class SqliteCache(CacheProtocol):
         if existing is None:
             raise KeyError(f"No cached response found for key {cache_key}")
 
-        existing_metadata = ResponseMetadataRoot.model_validate_json(
+        existing_metadata = ResponseMetadata.deserialize(
             existing.response_metadata_json
-        ).root
+        )
         merged_metadata = merge_cached_revalidation_metadata(
             cached=existing_metadata,
             refreshed=metadata,

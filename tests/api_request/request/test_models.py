@@ -153,7 +153,7 @@ def test_response_and_responses_serialization_roundtrip() -> None:
         failed={request.request_key: failed},
     )
 
-    assert Response.from_string(response.to_string(indent=2)) == response
+    assert Response.deserialize(response.serialize(indent=2)) == response
     assert Responses.from_string(responses.to_string(indent=2)) == responses
 
 
@@ -161,7 +161,7 @@ def test_response_metadata_as_string_returns_json_payload() -> None:
     """as_string should emit a JSON payload containing status metadata."""
     metadata = _build_metadata(headers=(("Date", "Mon, 06 Jul 2026 18:00:00 GMT"),))
 
-    metadata_json = metadata.as_string
+    metadata_json = metadata.serialize()
 
     assert '"status_code":200' in metadata_json
     assert '"url":"https://example.invalid/resource"' in metadata_json
