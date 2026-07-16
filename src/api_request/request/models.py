@@ -7,7 +7,7 @@ plus convenience properties for common HTTP metadata lookups.
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import RootModel
