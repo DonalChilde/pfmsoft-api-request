@@ -1,7 +1,7 @@
 [project]
 name = "api-request"
-version = "0.1.1"
-description = "Add your description here"
+version = "0.1.2"
+description = "A command line api request tool with caching and rate limiting."
 readme = "README.md"
 authors = [{ name = "Chad Lowe", email = "pfmsoft.dev@gmail.com" }]
 requires-python = ">=3.14"
