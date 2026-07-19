@@ -12,7 +12,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "typer>=0.26.8",
-    "whenever>=0.10.0",
+    "whenever>=0.10.2",
 ]
 # https://packaging.python.org/en/latest/specifications/license-expression/#specification
 license = "MIT"
@@ -40,7 +40,11 @@ module-name = "pfmsoft.api_request"
 pfmsoft-eve-snippets = false
 
 [dependency-groups]
-dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0", "ruff>=0.15.20"]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.21",
+]
 [project.urls]
 Documentation = "https://github.com/DonalChilde/pfmsoft-api-request#readme"
 # Documentation_rtd = "https://esi-link.readthedocs.io"
