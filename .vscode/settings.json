@@ -8,8 +8,8 @@
   "python.testing.pytestEnabled": true,
   "python.testing.cwd": "${workspaceFolder}",
   "python.testing.pytestArgs": [
-    "tests/api_request",
-    "--cov=src/api_request",
+    "tests/pfmsoft/api_request",
+    "--cov=src/pfmsoft/api_request",
     "--cov-report=term-missing",
     "--cov-report=xml:coverage.xml"
   ],

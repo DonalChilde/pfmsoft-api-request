@@ -1,5 +1,5 @@
 [project]
-name = "api-request"
+name = "pfmsoft-api-request"
 version = "0.1.2"
 description = "A command line api request tool with caching and rate limiting."
 readme = "README.md"
@@ -8,6 +8,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiolimiter>=1.2.1",
     "httpx2>=2.5.0",
+    "pfmsoft-eve-snippets>=0.1.4",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "typer>=0.26.8",
@@ -23,20 +24,28 @@ license-files = ["LICENSE"]
 # script entry-points
 # COMMAND_NAME = "PATH.TO.ENTRY.MODULE:ENTRY_FUNCTION"
 
-api-request = "api_request.cli.main_typer:app"
+api-request = "pfmsoft.api_request.cli.main_typer:app"
 
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]
 build-backend = "uv_build"
 
+# For a namespaced project
+[tool.uv.build-backend]
+module-name = "pfmsoft.api_request"
+
+# Don't wait for internal package updates.
+[tool.uv.exclude-newer-package]
+pfmsoft-eve-snippets = false
+
 [dependency-groups]
 dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0", "ruff>=0.15.20"]
 [project.urls]
-Documentation = "https://github.com/DonalChilde/api-request#readme"
+Documentation = "https://github.com/DonalChilde/pfmsoft-api-request#readme"
 # Documentation_rtd = "https://esi-link.readthedocs.io"
-Issues = "https://github.com/DonalChilde/api-request/issues"
-Source = "https://github.com/DonalChilde/api-request"
+Issues = "https://github.com/DonalChilde/pfmsoft-api-request/issues"
+Source = "https://github.com/DonalChilde/pfmsoft-api-request"
 
 [tool.uv]
 exclude-newer = "1 week"
