@@ -8,16 +8,27 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from pfmsoft.eve_snippets.sqlite3.connection_helpers import create_read_write_connection
 from whenever import Instant
 
-from pfmsoft.api_request.cache.sqlite_cache.connection_helpers import (
-    create_read_write_connection,
-)
 from pfmsoft.api_request.cache.sqlite_cache.sqlite_cache import (
     SqliteCache,
     SqliteCacheFactory,
 )
 from pfmsoft.api_request.request.models import ResponseMetadata, ResponseMetadataRoot
+
+_MOCK_WEB_CACHE_TABLE_DEFINITIONS_SQL = """
+CREATE TABLE IF NOT EXISTS WebCache (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key TEXT NOT NULL UNIQUE,
+    response_text TEXT NOT NULL,
+    response_metadata_json TEXT NOT NULL,
+    etag TEXT,
+    last_modified TEXT,
+    expires_at INTEGER,
+    cache_timestamp INTEGER NOT NULL
+);
+"""
 
 
 def _build_metadata(
@@ -198,7 +209,8 @@ def test_sqlite_cache_context_manager_respects_connection_ownership(
             raise AssertionError("Path-owned SQLite connection should be closed")
 
         external_connection = create_read_write_connection(
-            _build_db_path(tmp_path, name="external.sqlite3")
+            _build_db_path(tmp_path, name="external.sqlite3"),
+            init_sql=_MOCK_WEB_CACHE_TABLE_DEFINITIONS_SQL,
         )
         external_cache = SqliteCache(external_connection)
         async with external_cache:

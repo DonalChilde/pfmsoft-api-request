@@ -8,9 +8,23 @@ import logging
 import sqlite3
 from uuid import UUID
 
+from pfmsoft.api_request.helpers.package_resource import load_package_resouce_text
+
 from ..models import CachedResponse
 
 logger = logging.getLogger(__name__)
+
+_table_def_parent = "pfmsoft.api_request.cache.sqlite_cache"
+_table_def_sql = "table_definitions.sql"
+
+
+def load_table_definitions() -> str:
+    """Load the packaged SQL script for creating the database schema.
+
+    Returns:
+        The contents of the SQL script as a string.
+    """
+    return load_package_resouce_text(_table_def_parent, _table_def_sql)
 
 
 def write_cached_response(

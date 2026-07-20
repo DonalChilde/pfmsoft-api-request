@@ -10,14 +10,16 @@ from types import TracebackType
 from typing import Self
 from uuid import UUID
 
+from pfmsoft.eve_snippets.sqlite3.connection_helpers import create_read_write_connection
 from whenever import Instant
+
+from pfmsoft.api_request.cache.sqlite_cache.query_helpers import load_table_definitions
 
 from ...request.models import ResponseMetadata
 from ..metadata_helpers import merge_cached_revalidation_metadata
 from ..models import CachedResponse, CacheInfo
 from ..protocols import CacheFactoryProtocol, CacheProtocol
 from . import query_helpers
-from .connection_helpers import create_read_write_connection
 
 
 class SqliteCache(CacheProtocol):
@@ -56,7 +58,10 @@ class SqliteCache(CacheProtocol):
     async def __aenter__(self) -> Self:
         """Enter context and open path-owned connections when needed."""
         if self._connection_path is not None:
-            self._connection = create_read_write_connection(self._connection_path)
+            table_definitions = load_table_definitions()
+            self._connection = create_read_write_connection(
+                self._connection_path, init_sql=table_definitions
+            )
             self._close_connection_on_exit = True
         return self
 
