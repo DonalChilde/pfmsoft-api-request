@@ -76,12 +76,12 @@ from uuid import UUID
 
 from httpx2 import AsyncClient
 from httpx2 import Response as HttpResponse
+from pfmsoft.eve_snippets import json_io
 from pfmsoft.eve_snippets.httpx2.http_session_factory import config_async_http_client
 from whenever import Instant
 
 from pfmsoft.api_request.cache.models import CachedResponse
 from pfmsoft.api_request.cache.protocols import CacheFactory, CacheProtocol
-from pfmsoft.api_request.helpers import json_io
 from pfmsoft.api_request.rate_limit.protocols import (
     RateLimiterFactoryProtocol,
     RateLimiterProtocol,

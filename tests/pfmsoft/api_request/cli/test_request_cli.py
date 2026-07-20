@@ -186,15 +186,15 @@ def test_request_cli_writes_file_and_reports_path(
     def fake_save_text_file(
         *,
         text: str,
-        output_directory: Path,
-        file_name: str,
+        directory: Path,
+        filename: str,
         overwrite: bool,
     ) -> Path:
         save_call["text"] = text
-        save_call["output_directory"] = output_directory
-        save_call["file_name"] = file_name
+        save_call["directory"] = directory
+        save_call["filename"] = filename
         save_call["overwrite"] = overwrite
-        return output_directory / file_name
+        return directory / filename
 
     monkeypatch.setattr(request_cmd, "setup_logging", lambda *, log_dir: None)
     monkeypatch.setattr(request_cmd, "get_stdin", _requests_json)
@@ -222,8 +222,8 @@ def test_request_cli_writes_file_and_reports_path(
         overwrite=True,
     )
 
-    assert save_call["output_directory"] == output_file.parent
-    assert save_call["file_name"] == output_file.name
+    assert save_call["directory"] == output_file.parent
+    assert save_call["filename"] == output_file.name
     assert save_call["overwrite"] is True
     assert "successful" in save_call["text"]
     assert any("Responses saved to" in str(message) for message in consoles[0].messages)

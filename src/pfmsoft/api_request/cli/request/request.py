@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from pfmsoft.eve_snippets import save_text_file
 from rich.console import Console
 from rich.json import JSON
 
@@ -16,7 +17,6 @@ from pfmsoft.api_request.cli.helpers import (
     get_api_request_settings_from_context,
     get_stdin,
 )
-from pfmsoft.api_request.helpers.save_text_file import save_text_file
 from pfmsoft.api_request.logging_config import setup_logging
 from pfmsoft.api_request.rate_limit.aio_limiter import AiolimiterRateLimiterFactory
 from pfmsoft.api_request.request.models import (
@@ -206,8 +206,8 @@ def request(
     else:
         output_path = save_text_file(
             text=ResponsesRoot(root=responses).model_dump_json(indent=indent),
-            output_directory=file_out.parent,
-            file_name=file_out.name,
+            directory=file_out.parent,
+            filename=file_out.name,
             overwrite=overwrite,
         )
         messenger.print(f"[bold green]Responses saved to {output_path}[/bold green]")
