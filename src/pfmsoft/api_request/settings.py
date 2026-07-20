@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 USER_AGENT = f"{__app_name__} ({__version__}) (+{__url__})"
 APP_DOMAIN = f"{__project_namespace__}.{__app_name__}"
-APP_NAMESPACE = uuid5(NAMESPACE_DNS, APP_DOMAIN)
-ENV_PREFIX = APP_DOMAIN.replace(".", "_").replace("-", "_").upper() + "_"
+APP_NAMESPACE = uuid5(NAMESPACE_DNS, __app_name__)
+ENV_PREFIX = __app_name__.replace(".", "_").replace("-", "_").upper() + "_"
 SETTINGS_KEY = ENV_PREFIX + "SETTINGS"
 
 
