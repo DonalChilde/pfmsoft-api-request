@@ -206,7 +206,7 @@ dev = [
 requires-dist = [
     { name = "aiolimiter", specifier = ">=1.2.1" },
     { name = "httpx2", specifier = ">=2.5.0" },
-    { name = "pfmsoft-eve-snippets", specifier = ">=0.1.4" },
+    { name = "pfmsoft-eve-snippets", specifier = ">=0.1.7" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
     { name = "typer", specifier = ">=0.26.8" },
@@ -222,7 +222,7 @@ dev = [
 
 [[package]]
 name = "pfmsoft-eve-snippets"
-version = "0.1.4"
+version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx2" },
@@ -230,9 +230,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "whenever" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/12/65/0e81dfa54dc3d953f07f6b9b0482910e2fa9b4d5f8578ead1568ec465be1/pfmsoft_eve_snippets-0.1.4.tar.gz", hash = "sha256:beb539e464a1bead0164c717c0c8bef9f504857d89a442df3af869e9b08cf20e", size = 10830, upload-time = "2026-07-19T17:22:08.924Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/5b/951fd2fee4e9ae10a746264193c2e924ebbd7f2414bbe9da091bcbc42237/pfmsoft_eve_snippets-0.1.7.tar.gz", hash = "sha256:3fde0b56e96b9d4636117d89cc6a31d318c36559d06d84b966a7eddd0e2f1686", size = 11124, upload-time = "2026-07-20T17:52:57.717Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/24/75e3e6b8ff34f3e2af463c29c94f64cabcccd05493a96c37d63c9814320d/pfmsoft_eve_snippets-0.1.4-py3-none-any.whl", hash = "sha256:e1219bedcfc91b75de2750c84c43b24bd286b9b2f6f6ec0b727b97b039be21d0", size = 16241, upload-time = "2026-07-19T17:22:07.61Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/0e/c4824d4f8eda9e16971b13fc84953ca3f94ebbf367faa55e3e1abd7da140/pfmsoft_eve_snippets-0.1.7-py3-none-any.whl", hash = "sha256:4795da844e257c35476ee5016ab8ba571caea8ce56b312c2b0b4d231d924714b", size = 16653, upload-time = "2026-07-20T17:52:56.407Z" },
 ]
 
 [[package]]

@@ -8,7 +8,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiolimiter>=1.2.1",
     "httpx2>=2.5.0",
-    "pfmsoft-eve-snippets>=0.1.4",
+    "pfmsoft-eve-snippets>=0.1.7",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "typer>=0.26.8",
