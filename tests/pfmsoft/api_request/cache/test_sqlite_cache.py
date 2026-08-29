@@ -50,6 +50,13 @@ def _build_metadata(
         headers.append(("ETag", etag))
     if cache_control is not None:
         headers.append(("Cache-Control", cache_control))
+
+    # Convert timestamp to ISO 8601 string
+    if received_timestamp is not None:
+        received_at = Instant.from_timestamp_nanos(received_timestamp).format_iso()
+    else:
+        received_at = Instant.now().format_iso()
+
     return ResponseMetadata(
         status_code=status_code,
         reason_phrase=reason_phrase,
@@ -57,11 +64,7 @@ def _build_metadata(
         elapsed=10,
         bytes_downloaded=bytes_downloaded,
         headers=tuple(headers),
-        received_timestamp=(
-            received_timestamp
-            if received_timestamp is not None
-            else Instant.now().timestamp_nanos()
-        ),
+        received_at=received_at,
     )
 
 
@@ -134,7 +137,9 @@ def test_sqlite_cache_update_304_preserves_body_and_success_metadata(
             assert merged.bytes_downloaded == 99
             assert merged.etag == '"etag-2"'
             assert merged.cache_control == "max-age=120"
-            assert merged.received_timestamp == 2_000
+            assert (
+                merged.received_at == Instant.from_timestamp_nanos(2_000).format_iso()
+            )
 
             persisted = await cache.get(stored.cache_key)
             assert persisted == updated
@@ -234,7 +239,7 @@ def test_sqlite_cache_set_requires_validators(tmp_path: Path) -> None:
             elapsed=10,
             bytes_downloaded=2,
             headers=(("Date", "Mon, 06 Jul 2026 18:00:00 GMT"),),
-            received_timestamp=Instant.now().timestamp_nanos(),
+            received_at=Instant.now().format_iso(),
         )
 
         async with cache:

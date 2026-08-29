@@ -51,5 +51,5 @@ def merge_cached_revalidation_metadata(
         elapsed=refreshed.elapsed,
         bytes_downloaded=cached.bytes_downloaded,
         headers=tuple(merged_headers),
-        received_timestamp=refreshed.received_timestamp,
+        received_at=refreshed.received_at,
     )

@@ -16,7 +16,6 @@ from pfmsoft.api_request.cache.models import (
 
 def test_cached_response_is_expired_and_cache_age() -> None:
     """CachedResponse should report expiration and non-negative age."""
-    now_seconds = Instant.now().timestamp()
     now_nanos = Instant.now().timestamp_nanos()
 
     no_expiry = CachedResponse(
@@ -30,7 +29,7 @@ def test_cached_response_is_expired_and_cache_age() -> None:
         cache_key=uuid4(),
         response_text="[]",
         response_metadata_json="{}",
-        expires_at=now_seconds - 1,
+        expires_at=Instant.now().add(seconds=-1).format_iso(),
         cache_timestamp=now_nanos - 1_000,
     )
 

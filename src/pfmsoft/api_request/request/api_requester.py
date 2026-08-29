@@ -224,19 +224,14 @@ class ApiRequester(ApiRequesterProtocol):
     @staticmethod
     def _http_response_to_metadata(response: HttpResponse) -> ResponseMetadata:
         """Convert an HTTP client response to package response metadata."""
-        bytes_downloaded = getattr(
-            response,
-            "num_bytes_downloaded",
-            len(getattr(response, "content", b"")),
-        )
         return ResponseMetadata(
             status_code=response.status_code,
             reason_phrase=response.reason_phrase,
             url=str(response.url),
             elapsed=int(response.elapsed.total_seconds() * 1_000_000),
-            bytes_downloaded=bytes_downloaded,
+            bytes_downloaded=response.num_bytes_downloaded,
             headers=tuple(response.headers.items()),
-            received_timestamp=Instant.now().timestamp_nanos(),
+            received_at=Instant.now().format_iso(),
         )
 
     @staticmethod
@@ -458,6 +453,14 @@ class ApiRequester(ApiRequesterProtocol):
                     params=request.request.parameters,
                     json=request.request.body,
                 )
+                logger.info(
+                    "Response received for request %s: %s. Elapsed: %.2f seconds, Bytes downloaded: %d, Headers: %r",
+                    http_response.url,
+                    http_response,
+                    http_response.elapsed.total_seconds(),
+                    http_response.num_bytes_downloaded,
+                    http_response.headers,
+                )
         except Exception as exc:  # noqa: BLE001
             if self._is_fatal_exception(exc):
                 raise
@@ -673,9 +676,54 @@ class ApiRequester(ApiRequesterProtocol):
         first_response: SuccessfulResponseBase,
         paged_responses: list[SuccessfulResponseBase],
     ) -> bool:
+        """Check for paged-source drift."""
+        etag_changed = self._etag_drift_detected(first_response, paged_responses)
+        last_modified_changed = self._last_modified_drift_detected(
+            first_response, paged_responses
+        )
+        # 29Aug2026 the GetUniverseTypes operation consitently returned a last-modified
+        # drift warning on page 10, but the etag was consistent. For now, we will only treat etag
+        # drift as a failure condition. last modified previously worked.
+        _ = last_modified_changed  # Currently unused, but may be used in future consistency checks
+
+        return etag_changed
+
+    def _last_modified_drift_detected(
+        self,
+        first_response: SuccessfulResponseBase,
+        paged_responses: list[SuccessfulResponseBase],
+    ) -> bool:
         """Check for paged-source drift using `Last-Modified` consistency."""
         first_last_modified = first_response.metadata.last_modified
         for response in paged_responses:
             if response.metadata.last_modified != first_last_modified:
+                logger.warning(
+                    "Detected source data change for url=%s: first response last-modified=%s, "
+                    "paged response last-modified=%s for page_number=%s",
+                    response.request.url,
+                    first_last_modified,
+                    response.metadata.last_modified,
+                    response.request.parameters.get("page"),
+                )
+                return True
+        return False
+
+    def _etag_drift_detected(
+        self,
+        first_response: SuccessfulResponseBase,
+        paged_responses: list[SuccessfulResponseBase],
+    ) -> bool:
+        """Check for paged-source drift using `ETag` consistency."""
+        first_etag = first_response.metadata.etag
+        for response in paged_responses:
+            if response.metadata.etag != first_etag:
+                logger.warning(
+                    "Detected source data change for url=%s: first response etag=%s, "
+                    "paged response etag=%s for page_number=%s",
+                    response.request.url,
+                    first_etag,
+                    response.metadata.etag,
+                    response.request.parameters.get("page"),
+                )
                 return True
         return False

@@ -44,6 +44,10 @@ class _FakeHttpResponse:
     content: bytes
     elapsed: timedelta
 
+    @property
+    def num_bytes_downloaded(self) -> int:
+        return len(self.content)
+
 
 class _FakeAsyncClient:
     def __init__(self, responses: list[_FakeHttpResponse]):
@@ -178,19 +182,24 @@ def _build_metadata(
     status_code: int,
     text: str,
     last_modified: str,
+    etag: str | None = None,
     pages: int = 1,
     reason_phrase: str = "OK",
 ) -> tuple[str, object]:
+    headers = {
+        "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+        "Last-Modified": last_modified,
+        "X-Pages": str(pages),
+    }
+    if etag is not None:
+        headers["ETag"] = etag
+
     response = _FakeHttpResponse(
         status_code=status_code,
         reason_phrase=reason_phrase,
         url="https://example.invalid/data",
         text=text,
-        headers={
-            "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
-            "Last-Modified": last_modified,
-            "X-Pages": str(pages),
-        },
+        headers=headers,
         content=text.encode("utf-8"),
         elapsed=timedelta(milliseconds=5),
     )
@@ -250,7 +259,7 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
             response_text="[1]",
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
@@ -314,7 +323,7 @@ def test_cacheable_request_applies_stale_headers_without_mutating_request() -> N
             response_text="[1]",
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         response_304 = _FakeHttpResponse(
@@ -369,7 +378,7 @@ def test_cacheable_request_returns_fresh_cache_hit() -> None:
             response_text=response_text,
             response_metadata_json=metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() + 60,
+            expires_at=Instant.now().add(seconds=60).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         requester, cache = _build_requester(
@@ -407,7 +416,7 @@ def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
             response_text=stale_text,
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
@@ -466,7 +475,7 @@ def test_cacheable_request_refreshes_stale_paged_entry_on_200() -> None:
             response_text=stale_text,
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
@@ -718,13 +727,14 @@ def test_handle_paged_response_merges_json_lists() -> None:
 
 
 def test_handle_paged_response_fails_on_source_drift() -> None:
-    """Paged responses should fail when later pages change source metadata."""
+    """Paged responses should fail when later pages change ETag metadata."""
 
     async def run() -> None:
         first_text, first_metadata = _build_metadata(
             status_code=200,
             text="[1]",
             last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            etag='"abc"',
             pages=2,
         )
         requester, _ = _build_requester(
@@ -737,6 +747,7 @@ def test_handle_paged_response_fails_on_source_drift() -> None:
                     headers={
                         "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
                         "Last-Modified": "Mon, 06 Jul 2026 17:30:00 GMT",
+                        "ETag": '"def"',
                         "X-Pages": "1",
                     },
                     content=b"[2]",
@@ -921,7 +932,7 @@ def test_cacheable_request_returns_failed_refresh_result_directly() -> None:
             response_text='{"ok": true}',
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         requester, _ = _build_requester(
@@ -976,7 +987,7 @@ def test_cacheable_request_marks_unexpected_2xx_revalidation_as_failed() -> None
             response_text='{"ok": true}',
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         requester, _ = _build_requester(
