@@ -112,8 +112,8 @@ class ResponseMetadata:
         default_factory=tuple[tuple[str, str], ...]
     )
     """The headers of the response as a tuple of key-value pairs."""
-    received_timestamp: int = -1
-    """The timestamp when the response was received, as a Unix timestamp in nanoseconds."""
+    received_at: str
+    """The timestamp when the response was received as an ISO 8601 string."""
     _headers_lower: dict[str, str] = field(
         init=False, repr=False, default_factory=dict[str, str]
     )
@@ -145,15 +145,23 @@ class ResponseMetadata:
         return self._headers_lower
 
     @property
-    def received_at(self) -> Instant:
+    def received_at_instant(self) -> Instant:
         """Convert `received_timestamp` to an Instant.
 
         Raises:
             ValueError: If `received_timestamp` is unset (`-1`).
         """
-        if self.received_timestamp != -1:
-            return Instant.from_timestamp_nanos(self.received_timestamp)
-        raise ValueError("Received timestamp is not set.")
+        try:
+            return Instant.parse_iso(self.received_at)
+        except ValueError as e:
+            logger.error(
+                "Failed to parse received_at timestamp '%s' as ISO 8601. Error: %s",
+                self.received_at,
+                e,
+            )
+            raise ValueError(
+                f"Failed to parse received_at timestamp '{self.received_at}' as ISO 8601. Error: {e}"
+            ) from e
 
     @property
     def etag(self) -> str | None:
@@ -162,17 +170,26 @@ class ResponseMetadata:
 
     @property
     def last_modified(self) -> str | None:
-        """Extract the Last-Modified header from the response headers, if present."""
+        """Extract the Last-Modified header from the response headers, if present.
+
+        If present, this is a string in RFC 2822 format.
+        """
         return self.headers_lower.get("last-modified")
 
     @property
     def expires(self) -> str | None:
-        """Extract the Expires header from the response headers, if present."""
+        """Extract the Expires string from the response headers, if present.
+
+        If present, this is a string in RFC 2822 format.
+        """
         return self.headers_lower.get("expires")
 
     @property
     def date(self) -> str | None:
-        """Extract the Date header from the response headers, if present."""
+        """Extract the Date header from the response headers, if present.
+
+        If present, this is a string in RFC 2822 format.
+        """
         return self.headers_lower.get("date")
 
     @property
@@ -206,8 +223,8 @@ class ResponseMetadata:
         return None
 
     @property
-    def expires_at(self) -> int | None:
-        """Return cache expiration instant derived from response headers.
+    def expires_at(self) -> str | None:
+        """Return cache expiration instant derived from response headers as IS 8601 string.
 
         Precedence:
             1. `Cache-Control: max-age` with a valid `Date` header.
@@ -217,12 +234,29 @@ class ResponseMetadata:
         if self.max_age is not None and self.date is not None:
             try:
                 response_date = Instant.parse_rfc2822(self.date)
-                return response_date.add(seconds=self.max_age).timestamp()
+                return response_date.add(seconds=self.max_age).format_iso()
             except ValueError:
                 pass
         if self.expires:
             try:
-                return Instant.parse_rfc2822(self.expires).timestamp()
+                return Instant.parse_rfc2822(self.expires).format_iso()
+            except ValueError:
+                pass
+        return None
+
+    @property
+    def expires_at_instant(self) -> Instant | None:
+        """Return cache expiration instant derived from response headers as an Instant.
+
+        Precedence:
+            1. `Cache-Control: max-age` with a valid `Date` header.
+            2. `Expires` header.
+            3. `None` when neither can be parsed.
+        """
+        expires_at_str = self.expires_at
+        if expires_at_str:
+            try:
+                return Instant.parse_iso(expires_at_str)
             except ValueError:
                 pass
         return None

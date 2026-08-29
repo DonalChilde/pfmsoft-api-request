@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 import typer
+from whenever import Instant
 
 from pfmsoft.api_request.cli.request import request as request_cmd
 from pfmsoft.api_request.request.models import (
@@ -67,7 +68,7 @@ def _build_successful_responses(requests: dict[UUID, Request]) -> Responses:
         elapsed=1,
         bytes_downloaded=2,
         headers=(("Date", "Mon, 06 Jul 2026 18:00:00 GMT"),),
-        received_timestamp=1_000,
+        received_at=Instant.from_timestamp_nanos(1_000).format_iso(),
     )
     response = Response(
         metadata=metadata,

@@ -33,7 +33,7 @@ def _build_metadata(*, headers: tuple[tuple[str, str], ...]) -> ResponseMetadata
         elapsed=10,
         bytes_downloaded=2,
         headers=headers,
-        received_timestamp=1_000_000,
+        received_at="2026-07-06T18:00:00Z",
     )
 
 
@@ -66,7 +66,7 @@ def test_response_metadata_accessors_cover_cache_and_ratelimit_fields() -> None:
     assert metadata.ratelimit.limit == "100"
     assert metadata.ratelimit.remaining == "90"
     assert metadata.ratelimit.used == "10"
-    assert metadata.received_at.timestamp_nanos() == 1_000_000
+    assert metadata.received_at_instant is not None
 
 
 def test_response_metadata_handles_invalid_header_values() -> None:
@@ -107,7 +107,7 @@ def test_response_metadata_date_as_instant_is_none_when_date_missing() -> None:
 
 
 def test_response_metadata_received_at_raises_when_unset() -> None:
-    """received_at should raise when received_timestamp is not initialized."""
+    """received_at should raise when it cannot be parsed as ISO 8601."""
     metadata = ResponseMetadata(
         status_code=200,
         reason_phrase="OK",
@@ -115,11 +115,11 @@ def test_response_metadata_received_at_raises_when_unset() -> None:
         elapsed=10,
         bytes_downloaded=2,
         headers=(),
-        received_timestamp=-1,
+        received_at="invalid-iso-date",
     )
 
-    with pytest.raises(ValueError, match="Received timestamp is not set"):
-        _ = metadata.received_at
+    with pytest.raises(ValueError, match="Failed to parse received_at timestamp"):
+        _ = metadata.received_at_instant
 
 
 def test_response_metadata_duplicate_headers_log_warning(caplog) -> None:

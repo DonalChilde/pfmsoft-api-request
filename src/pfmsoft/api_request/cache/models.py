@@ -30,8 +30,8 @@ class CachedResponse:
     """Cached ETag validator, if present."""
     last_modified: str | None = None
     """Cached Last-Modified validator, if present."""
-    expires_at: int | None = None
-    """Expiration instant in Unix seconds, or None when unknown."""
+    expires_at: str | None = None
+    """Expiration instant as an ISO 8601 string, or None when unknown."""
     cache_timestamp: int
     """Write/update instant in Unix nanoseconds."""
 
@@ -43,7 +43,7 @@ class CachedResponse:
         """
         if self.expires_at is None:
             return False
-        return Instant.now().timestamp() >= self.expires_at
+        return Instant.now() >= Instant.parse_iso(self.expires_at)
 
     @property
     def cache_age(self) -> int:
