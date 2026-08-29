@@ -223,7 +223,7 @@ wheels = [
 
 [[package]]
 name = "pfmsoft-api-request"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "aiolimiter" },
