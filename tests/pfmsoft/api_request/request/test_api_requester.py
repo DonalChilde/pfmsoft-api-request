@@ -44,6 +44,10 @@ class _FakeHttpResponse:
     content: bytes
     elapsed: timedelta
 
+    @property
+    def num_bytes_downloaded(self) -> int:
+        return len(self.content)
+
 
 class _FakeAsyncClient:
     def __init__(self, responses: list[_FakeHttpResponse]):
@@ -178,19 +182,24 @@ def _build_metadata(
     status_code: int,
     text: str,
     last_modified: str,
+    etag: str | None = None,
     pages: int = 1,
     reason_phrase: str = "OK",
 ) -> tuple[str, object]:
+    headers = {
+        "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
+        "Last-Modified": last_modified,
+        "X-Pages": str(pages),
+    }
+    if etag is not None:
+        headers["ETag"] = etag
+
     response = _FakeHttpResponse(
         status_code=status_code,
         reason_phrase=reason_phrase,
         url="https://example.invalid/data",
         text=text,
-        headers={
-            "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
-            "Last-Modified": last_modified,
-            "X-Pages": str(pages),
-        },
+        headers=headers,
         content=text.encode("utf-8"),
         elapsed=timedelta(milliseconds=5),
     )
@@ -718,13 +727,14 @@ def test_handle_paged_response_merges_json_lists() -> None:
 
 
 def test_handle_paged_response_fails_on_source_drift() -> None:
-    """Paged responses should fail when later pages change source metadata."""
+    """Paged responses should fail when later pages change ETag metadata."""
 
     async def run() -> None:
         first_text, first_metadata = _build_metadata(
             status_code=200,
             text="[1]",
             last_modified="Mon, 06 Jul 2026 17:00:00 GMT",
+            etag='"abc"',
             pages=2,
         )
         requester, _ = _build_requester(
@@ -737,6 +747,7 @@ def test_handle_paged_response_fails_on_source_drift() -> None:
                     headers={
                         "Date": "Mon, 06 Jul 2026 18:00:00 GMT",
                         "Last-Modified": "Mon, 06 Jul 2026 17:30:00 GMT",
+                        "ETag": '"def"',
                         "X-Pages": "1",
                     },
                     content=b"[2]",
