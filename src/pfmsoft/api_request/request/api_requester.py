@@ -677,16 +677,27 @@ class ApiRequester(ApiRequesterProtocol):
         paged_responses: list[SuccessfulResponseBase],
     ) -> bool:
         """Check for paged-source drift."""
-        etag_changed = self._etag_drift_detected(first_response, paged_responses)
         last_modified_changed = self._last_modified_drift_detected(
             first_response, paged_responses
         )
         # 29Aug2026 the GetUniverseTypes operation consitently returned a last-modified
-        # drift warning on page 10, but the etag was consistent. For now, we will only treat etag
-        # drift as a failure condition. last modified previously worked.
-        _ = last_modified_changed  # Currently unused, but may be used in future consistency checks
-
-        return etag_changed
+        # drift warning on page 10, but the etag was consistent. If last_moddified_changed
+        # is True but etag_changed is False, treat as non-fatal for now.
+        if last_modified_changed:
+            etag_changed = self._etag_drift_detected(first_response, paged_responses)
+            if not etag_changed:
+                logger.warning(
+                    "Last-Modified drift detected but ETag is consistent. "
+                    "Treating as non-fatal for now."
+                )
+                return False
+            else:
+                logger.warning(
+                    "Last-Modified drift detected and ETag is inconsistent. "
+                    "Treating as fatal."
+                )
+                return True
+        return last_modified_changed
 
     def _last_modified_drift_detected(
         self,
