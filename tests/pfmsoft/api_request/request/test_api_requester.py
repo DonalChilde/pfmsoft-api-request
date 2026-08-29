@@ -259,7 +259,7 @@ def test_cacheable_request_refreshes_stale_entry_on_304() -> None:
             response_text="[1]",
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
@@ -323,7 +323,7 @@ def test_cacheable_request_applies_stale_headers_without_mutating_request() -> N
             response_text="[1]",
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         response_304 = _FakeHttpResponse(
@@ -378,7 +378,7 @@ def test_cacheable_request_returns_fresh_cache_hit() -> None:
             response_text=response_text,
             response_metadata_json=metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() + 60,
+            expires_at=Instant.now().add(seconds=60).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         requester, cache = _build_requester(
@@ -416,7 +416,7 @@ def test_cacheable_request_refreshes_stale_entry_on_200() -> None:
             response_text=stale_text,
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
@@ -475,7 +475,7 @@ def test_cacheable_request_refreshes_stale_paged_entry_on_200() -> None:
             response_text=stale_text,
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
 
@@ -932,7 +932,7 @@ def test_cacheable_request_returns_failed_refresh_result_directly() -> None:
             response_text='{"ok": true}',
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         requester, _ = _build_requester(
@@ -987,7 +987,7 @@ def test_cacheable_request_marks_unexpected_2xx_revalidation_as_failed() -> None
             response_text='{"ok": true}',
             response_metadata_json=stale_metadata.serialize(),
             etag='"abc"',
-            expires_at=Instant.now().timestamp() - 1,
+            expires_at=Instant.now().add(seconds=-1).format_iso(),
             cache_timestamp=Instant.now().timestamp_nanos(),
         )
         requester, _ = _build_requester(

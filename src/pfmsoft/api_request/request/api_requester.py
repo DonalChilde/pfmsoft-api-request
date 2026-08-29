@@ -224,19 +224,14 @@ class ApiRequester(ApiRequesterProtocol):
     @staticmethod
     def _http_response_to_metadata(response: HttpResponse) -> ResponseMetadata:
         """Convert an HTTP client response to package response metadata."""
-        bytes_downloaded = getattr(
-            response,
-            "num_bytes_downloaded",
-            len(getattr(response, "content", b"")),
-        )
         return ResponseMetadata(
             status_code=response.status_code,
             reason_phrase=response.reason_phrase,
             url=str(response.url),
             elapsed=int(response.elapsed.total_seconds() * 1_000_000),
-            bytes_downloaded=bytes_downloaded,
+            bytes_downloaded=response.num_bytes_downloaded,
             headers=tuple(response.headers.items()),
-            received_timestamp=Instant.now().timestamp_nanos(),
+            received_at=Instant.now().format_iso(),
         )
 
     @staticmethod

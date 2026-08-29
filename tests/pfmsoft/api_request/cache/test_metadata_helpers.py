@@ -23,7 +23,7 @@ def _metadata(
         elapsed=10,
         bytes_downloaded=bytes_downloaded,
         headers=headers,
-        received_timestamp=received_timestamp,
+        received_at=received_timestamp,
     )
 
 
@@ -52,7 +52,7 @@ def test_merge_cached_revalidation_metadata_replaces_and_appends_headers() -> No
     assert merged.status_code == 200
     assert merged.reason_phrase == "OK"
     assert merged.bytes_downloaded == 11
-    assert merged.received_timestamp == 2_000
+    assert merged.received_at == 2_000
     assert merged.headers == (
         ("Date", "Mon, 06 Jul 2026 18:05:00 GMT"),
         ("ETag", '"v1"'),

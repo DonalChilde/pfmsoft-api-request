@@ -48,7 +48,7 @@ def _build_metadata(*, etag: str | None = '"abc"') -> ResponseMetadata:
         elapsed=10,
         bytes_downloaded=2,
         headers=tuple(headers),
-        received_timestamp=Instant.now().timestamp_nanos(),
+        received_at=Instant.now().format_iso(),
     )
 
 
@@ -82,15 +82,15 @@ def test_in_memory_cache_clear_filters_by_expiry_and_age() -> None:
         age_limit = 500_000
 
         expired = _build_cached_response(
-            expires_at=now_timestamp - 1,
+            expires_at=Instant.from_timestamp(now_timestamp - 1).format_iso(),
             cache_timestamp=now_nanos - 1_000_000,
         )
         old_but_unexpired = _build_cached_response(
-            expires_at=now_timestamp + 60,
+            expires_at=Instant.from_timestamp(now_timestamp + 60).format_iso(),
             cache_timestamp=now_nanos - 1_000_000,
         )
         fresh = _build_cached_response(
-            expires_at=now_timestamp + 60,
+            expires_at=Instant.from_timestamp(now_timestamp + 60).format_iso(),
             cache_timestamp=now_nanos + 1_000_000_000,
         )
 
@@ -138,7 +138,7 @@ def test_in_memory_cache_set_requires_cache_validators() -> None:
             elapsed=10,
             bytes_downloaded=2,
             headers=(("Date", "Mon, 06 Jul 2026 18:00:00 GMT"),),
-            received_timestamp=Instant.now().timestamp_nanos(),
+            received_at=Instant.now().format_iso(),
         )
 
         with pytest.raises(ValueError, match="require etag or last_modified"):
@@ -180,7 +180,7 @@ def test_in_memory_cache_update_304_merges_metadata_and_preserves_text() -> None
                 ("ETag", '"v2"'),
                 ("Cache-Control", "max-age=120"),
             ),
-            received_timestamp=Instant.now().timestamp_nanos(),
+            received_at=Instant.now().format_iso(),
         )
 
         updated = await cache.update_304(cache_key, refreshed_metadata)
